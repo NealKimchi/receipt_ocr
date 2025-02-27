@@ -1,0 +1,28 @@
+2025-02-26 14:25:21,542 - __main__ - INFO - Loading dataset: receipt_dataset
+2025-02-26 14:25:21,710 - __main__ - INFO - Could not load from Hugging Face, trying local path: receipt_dataset
+2025-02-26 14:25:22,008 - __main__ - ERROR - Failed to load dataset: The directory at /Users/nealkimchi/UO/winter2025/dsci410/receipt_ocr/receipt_dataset doesn't contain any data files
+2025-02-26 14:26:36,522 - __main__ - INFO - Loading dataset: receipt_dataset
+2025-02-26 14:26:36,682 - __main__ - INFO - Could not load from Hugging Face, trying local path: receipt_dataset
+2025-02-26 14:26:36,972 - __main__ - ERROR - Failed to load dataset: The directory at /Users/nealkimchi/UO/winter2025/dsci410/receipt_ocr/receipt_dataset doesn't contain any data files
+2025-02-26 14:27:37,762 - __main__ - INFO - Loading dataset: receipt_dataset
+2025-02-26 14:27:37,941 - __main__ - INFO - Could not load from Hugging Face, trying local path: receipt_dataset
+2025-02-26 14:27:38,216 - __main__ - ERROR - Failed to load dataset: The directory at /Users/nealkimchi/UO/winter2025/dsci410/receipt_ocr/receipt_dataset doesn't contain any data files
+2025-02-26 14:29:14,444 - __main__ - INFO - Loading dataset: receipt_dataset
+2025-02-26 14:29:14,641 - __main__ - INFO - Could not load from Hugging Face, trying local path: receipt_dataset
+2025-02-26 14:29:14,924 - __main__ - ERROR - Failed to load dataset: The directory at /Users/nealkimchi/UO/winter2025/dsci410/receipt_ocr/receipt_dataset doesn't contain any data files
+2025-02-26 14:29:31,516 - __main__ - INFO - Loading dataset: receipt_dataset
+2025-02-26 14:29:31,643 - __main__ - INFO - Could not load from Hugging Face, trying local path: receipt_dataset
+2025-02-26 14:29:31,921 - __main__ - ERROR - Failed to load dataset: The directory at /Users/nealkimchi/UO/winter2025/dsci410/receipt_ocr/receipt_dataset doesn't contain any data files
+2025-02-26 14:31:55,085 - __main__ - INFO - Loading dataset: mychen76/invoices-and-receipts_ocr_v2
+2025-02-26 14:31:57,669 - __main__ - INFO - Successfully loaded dataset from Hugging Face: mychen76/invoices-and-receipts_ocr_v2
+2025-02-26 14:31:57,675 - __main__ - INFO - Processing training dataset...
+2025-02-26 14:38:21,875 - __main__ - INFO - Processing validation dataset...
+2025-02-26 14:38:30,632 - __main__ - INFO - 
+Dataset processing results:
+2025-02-26 14:38:30,632 - __main__ - INFO - Training images processed: 2843
+2025-02-26 14:38:30,632 - __main__ - INFO - Training text regions detected: 587621
+2025-02-26 14:38:30,632 - __main__ - INFO - Training images with text: 2822 (99.3%)
+2025-02-26 14:38:30,632 - __main__ - INFO - Validation images processed: 170
+2025-02-26 14:38:30,632 - __main__ - INFO - Validation text regions detected: 42111
+2025-02-26 14:38:30,632 - __main__ - INFO - Validation images with text: 170 (100.0%)
+2025-02-26 14:38:30,632 - __main__ - INFO - Preprocessed data saved to: /Users/nealkimchi/UO/winter2025/dsci410/preprocessed_receipts
