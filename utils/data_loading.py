@@ -70,63 +70,108 @@ class ReceiptDataset(Dataset):
         return len(self.dataset)
     
     def __getitem__(self, idx):
-        # Get sample from dataset
+        # Load image
         sample = self.dataset[idx]
         
-        # Load image from URL
+        # Process image
         image = self._load_image_from_sample(sample)
         
-        # Extract bounding boxes from OCR annotations
-        bboxes, labels, confidences = self._extract_bboxes(sample, image.shape[:2])
+        # Extract OCR box annotations
+        boxes = self._process_ocr_boxes(sample, image.shape[:2])
         
-        # Create target heatmap for text regions
+        # Create text map
         h, w = image.shape[:2]
         text_map = np.zeros((h, w), dtype=np.float32)
-        for bbox in bboxes:
-            x_min, y_min, x_max, y_max = [int(coord) for coord in bbox]
-            text_map[y_min:y_max, x_min:x_max] = 1.0
+        
+        # Fill text map based on boxes
+        for box in boxes:
+            conf, x1, y1, x2, y2 = box
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            text_map[y1:y2, x1:x2] = 1.0
         
         # Apply transformations
         if self.transform:
-            transformed = self.transform(image=image, 
-                                        bboxes=bboxes,
-                                        labels=labels)
-            image = transformed['image']
-            transformed_bboxes = transformed['bboxes']
+            transformed = self.transform(
+                image=image,
+                masks=[text_map],
+                bboxes=[[box[1], box[2], box[3], box[4], box[0]] for box in boxes]  # Format: [x1, y1, x2, y2, class_id(conf)]
+            )
             
-            # Create target heatmap after resizing
-            h, w = self.image_size
-            target_text_map = np.zeros((h, w), dtype=np.float32)
-            for bbox in transformed_bboxes:
-                x_min, y_min, x_max, y_max = [int(coord) for coord in bbox]
-                # Ensure coordinates are within bounds
-                x_min = max(0, min(x_min, w-1))
-                y_min = max(0, min(y_min, h-1))
-                x_max = max(x_min+1, min(x_max, w))
-                y_max = max(y_min+1, min(y_max, h))
-                target_text_map[y_min:y_max, x_min:x_max] = 1.0
-        else:
-            target_text_map = text_map
-            transformed_bboxes = bboxes
-        
-        # Prepare target box representation
-        # Format: [confidence, x_min, y_min, x_max, y_max]
-        target_boxes = []
-        for i, bbox in enumerate(transformed_bboxes):
-            if i < len(confidences):  # Ensure we have a confidence value
-                target_boxes.append([confidences[i]] + list(bbox))
-            else:
-                target_boxes.append([1.0] + list(bbox))
+            image = transformed['image']
+            text_map = transformed['masks'][0] if transformed['masks'] else np.zeros(self.image_size, dtype=np.float32)
+            transformed_boxes = transformed['bboxes']
+            
+            # Convert boxes back to [conf, x1, y1, x2, y2] format
+            boxes = [[box[4], box[0], box[1], box[2], box[3]] for box in transformed_boxes]
         
         # Convert to tensor
-        target_text_map = torch.tensor(target_text_map, dtype=torch.float32).unsqueeze(0)
+        text_map = torch.tensor(text_map, dtype=torch.float32).unsqueeze(0)
         
         return {
             'image': image,
-            'text_map': target_text_map,
-            'boxes': torch.tensor(target_boxes, dtype=torch.float32) if target_boxes else torch.zeros((0, 5), dtype=torch.float32),
+            'text_map': text_map,
+            'boxes': boxes,
             'image_id': sample.get('id', str(idx))
         }
+
+    def _process_ocr_boxes(self, sample, image_shape):
+        """Process OCR boxes from the dataset.
+        
+        Args:
+            sample: Dataset sample
+            image_shape: Shape of the image (h, w)
+            
+        Returns:
+            list: List of boxes in format [confidence, x1, y1, x2, y2]
+        """
+        h, w = image_shape
+        processed_boxes = []
+        
+        # Try to extract ocr_boxes from the sample
+        if 'ocr_boxes' in sample:
+            raw_boxes = sample['ocr_boxes']
+            
+            # Handle different possible formats
+            if isinstance(raw_boxes, str):
+                # Try to parse JSON string
+                try:
+                    import json
+                    raw_boxes = json.loads(raw_boxes)
+                except:
+                    # If parsing fails, return empty list
+                    return []
+            
+            # Process the boxes based on the format in your dataset
+            for box_data in raw_boxes:
+                try:
+                    # Format from the example: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], (text, confidence)
+                    polygon_points = box_data[0]
+                    text_conf_tuple = box_data[1]
+                    
+                    # Extract polygon points
+                    x1 = min(point[0] for point in polygon_points)
+                    y1 = min(point[1] for point in polygon_points)
+                    x2 = max(point[0] for point in polygon_points)
+                    y2 = max(point[1] for point in polygon_points)
+                    
+                    # Extract confidence
+                    confidence = text_conf_tuple[1] if isinstance(text_conf_tuple, (tuple, list)) and len(text_conf_tuple) > 1 else 1.0
+                    
+                    # Ensure box dimensions are valid
+                    if x1 < x2 and y1 < y2:
+                        # Clamp to image bounds
+                        x1 = max(0, min(x1, w))
+                        y1 = max(0, min(y1, h))
+                        x2 = max(0, min(x2, w))
+                        y2 = max(0, min(y2, h))
+                        
+                        # Create box in our format: [confidence, x1, y1, x2, y2]
+                        processed_boxes.append([float(confidence), float(x1), float(y1), float(x2), float(y2)])
+                except Exception as e:
+                    print(f"Error processing box: {e}")
+                    continue
+        
+        return processed_boxes
 
     def _load_image_from_sample(self, sample):
         """Load image from sample data"""
@@ -298,7 +343,7 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
 
 def collate_fn(batch):
     """Custom collate function to handle variable number of boxes"""
-    # Filter out any failed samples (with None values)
+    # Filter out any failed samples
     valid_batch = [item for item in batch if item is not None]
     
     if not valid_batch:
