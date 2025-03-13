@@ -49,16 +49,38 @@ class ReceiptDataset(Dataset):
         # Get sample from dataset
         sample = self.dataset[idx]
         
+        # Print keys in the sample
         print(f"Sample {idx} keys: {list(sample.keys())}")
+        
+        # Check for OCR boxes
         if 'ocr_boxes' in sample:
-            print(f"ocr_boxes type: {type(sample['ocr_boxes'])}")
-            if isinstance(sample['ocr_boxes'], str):
-                print(f"ocr_boxes length: {len(sample['ocr_boxes'])}")
-                print(f"ocr_boxes preview: {sample['ocr_boxes'][:100]}")  # Show first 100 chars
-            elif isinstance(sample['ocr_boxes'], list):
-                print(f"ocr_boxes length: {len(sample['ocr_boxes'])}")
-                if len(sample['ocr_boxes']) > 0:
-                    print(f"First box: {sample['ocr_boxes'][0]}")
+            ocr_boxes = sample['ocr_boxes']
+            print(f"OCR boxes type: {type(ocr_boxes)}")
+            
+            # If it's a string, it might be JSON
+            if isinstance(ocr_boxes, str):
+                try:
+                    import json
+                    ocr_boxes = json.loads(ocr_boxes)
+                    print(f"Parsed JSON ocr_boxes to list of length {len(ocr_boxes)}")
+                    if len(ocr_boxes) > 0:
+                        print(f"First OCR box item: {ocr_boxes[0]}")
+                except Exception as e:
+                    print(f"Error parsing OCR boxes JSON: {e}")
+                    ocr_boxes = []
+            
+            # Handle list format
+            if isinstance(ocr_boxes, list):
+                print(f"OCR boxes list length: {len(ocr_boxes)}")
+                if len(ocr_boxes) > 0:
+                    print(f"First OCR box: {ocr_boxes[0]}")
+                    # Try to understand its structure
+                    first_box = ocr_boxes[0]
+                    if isinstance(first_box, list) and len(first_box) >= 2:
+                        print(f"Box structure - First element: {type(first_box[0])}")
+                        print(f"Box structure - Second element: {type(first_box[1])}")
+        else:
+            print(f"No 'ocr_boxes' field found in sample")
         
         # Load image 
         image = self._load_image(sample)
