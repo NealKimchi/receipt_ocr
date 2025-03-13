@@ -85,43 +85,29 @@ class AttentionBlock(nn.Module):
         
         self.relu = nn.ReLU(inplace=True)
     
-    def forward(self, x):
-        # Contracting path
-        x1 = self.inc(x)  # Output: 64 channels
-        x2 = self.down1(x1)  # Output: 128 channels
-        x3 = self.down2(x2)  # Output: 256 channels
-        x4 = self.down3(x3)  # Output: 512 channels
-        x5 = self.down4(x4)  # Output: 1024 channels
+    def forward(self, g, x):
+        """
+        Attention mechanism
+        Args:
+            g: Gating signal (B, C, H, W)
+            x: Skip connection feature map (B, C, H, W)
+        """
+        # Adjust spatial dimensions if needed
+        if g.size()[2:] != x.size()[2:]:
+            g = F.interpolate(g, size=x.size()[2:], mode='bilinear', align_corners=True)
+            
+        # Apply convolutions
+        g1 = self.W_g(g)
+        x1 = self.W_x(x)
         
-        # IMPORTANT FIX: The parameters order in AttentionBlock.forward is (g, x)
-        # where g is the gating signal (lower resolution feature map) and
-        # x is the feature map being attended to (skip connection)
-        # So it should be self.att1(x5, x4) not self.att1(x4, x5)
-        x4_att = self.att1(x5, x4)  # Correct: gating signal x5, feature map x4
+        # Element-wise sum and ReLU
+        psi = self.relu(g1 + x1)
         
-        # Here x5 has 1024 channels, x4_att has 512 channels
-        x = self.up1(x5, x4_att)  # Output: 512 channels
+        # Attention map
+        psi = self.psi(psi)
         
-        # Fix the same issue in the remaining attention blocks
-        x3_att = self.att2(x, x3)  # Correct: gating signal x, feature map x3
-        x = self.up2(x, x3_att)  # Output: 256 channels
-        
-        x2_att = self.att3(x, x2)  # Correct: gating signal x, feature map x2
-        x = self.up3(x, x2_att)  # Output: 128 channels
-        
-        x1_att = self.att4(x, x1)  # Correct: gating signal x, feature map x1
-        x = self.up4(x, x1_att)  # Output: 64 channels
-        
-        # Output prediction maps
-        text_map = torch.sigmoid(self.outc(x))
-        confidence = torch.sigmoid(self.confidence(x))
-        bbox_coords = torch.sigmoid(self.box_regressor(x))
-        
-        return {
-            'text_map': text_map,
-            'confidence': confidence,
-            'bbox_coords': bbox_coords
-        }
+        # Apply attention
+        return x * psi
         
 class TextDetectionModel(nn.Module):
     """U-Net inspired architecture for text detection in receipts"""
@@ -176,28 +162,26 @@ class TextDetectionModel(nn.Module):
         x4 = self.down3(x3)  # Output: 512 channels
         x5 = self.down4(x4)  # Output: 1024 channels
         
-        # Apply attention mechanism to skip connections
-        # Make sure x4_att has the same number of channels as x4 (512)
-        x4_att = self.att1(x4, x5)  # Important: This should output 512 channels
+        # Attention mechanism: gating signal is from the deeper layer
+        # and skip connection is from the encoder path
+        x4_att = self.att1(x5, x4)  # Gating signal: x5, Skip connection: x4
         
-        # Here x5 has 1024 channels, x4_att has 512 channels
+        # Up path with attended features
         x = self.up1(x5, x4_att)  # Output: 512 channels
         
-        # Continue similarly with the rest of the upsampling path
-        # Making sure channel dimensions match at each step
-        x3_att = self.att2(x3, x)  # Input: x3 (256 channels), x (512 channels)
+        x3_att = self.att2(x, x3)  # Gating signal: x, Skip connection: x3
         x = self.up2(x, x3_att)  # Output: 256 channels
         
-        x2_att = self.att3(x2, x)  # Input: x2 (128 channels), x (256 channels)
+        x2_att = self.att3(x, x2)  # Gating signal: x, Skip connection: x2
         x = self.up3(x, x2_att)  # Output: 128 channels
         
-        x1_att = self.att4(x1, x)  # Input: x1 (64 channels), x (128 channels)
+        x1_att = self.att4(x, x1)  # Gating signal: x, Skip connection: x1
         x = self.up4(x, x1_att)  # Output: 64 channels
         
         # Output prediction maps
-        text_map = torch.sigmoid(self.outc(x))  # Input: 64 channels
-        confidence = torch.sigmoid(self.confidence(x))  # Input: 64 channels
-        bbox_coords = torch.sigmoid(self.box_regressor(x))  # Input: 64 channels
+        text_map = torch.sigmoid(self.outc(x))
+        confidence = torch.sigmoid(self.confidence(x))
+        bbox_coords = torch.sigmoid(self.box_regressor(x))
         
         return {
             'text_map': text_map,
