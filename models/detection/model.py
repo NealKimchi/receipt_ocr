@@ -35,8 +35,10 @@ class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(UpBlock, self).__init__()
         self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-        # Change this line to correctly handle the concatenated channels
-        self.conv1 = ConvBlock(in_channels // 2 + in_channels, out_channels)
+        
+        # Important: After concatenation, we have in_channels // 2 + out_channels
+        # channels, not in_channels // 2 + in_channels as you might have written
+        self.conv1 = ConvBlock(in_channels // 2 + out_channels, out_channels)
         self.conv2 = ConvBlock(out_channels, out_channels)
     
     def forward(self, x1, x2):
@@ -49,6 +51,7 @@ class UpBlock(nn.Module):
         x1 = F.pad(x1, [diff_x // 2, diff_x - diff_x // 2, 
                         diff_y // 2, diff_y - diff_y // 2])
         
+        # Concatenate along channel dimension
         x = torch.cat([x2, x1], dim=1)
         x = self.conv1(x)
         x = self.conv2(x)
@@ -59,7 +62,7 @@ class AttentionBlock(nn.Module):
     def __init__(self, f_g, f_l, f_int=None):
         super(AttentionBlock, self).__init__()
         if f_int is None:
-            f_int = f_l
+            f_int = min(f_g, f_l) // 2  # Use half the minimum of both channels
         
         # Gating signal projection
         self.W_g = nn.Sequential(
@@ -97,8 +100,8 @@ class AttentionBlock(nn.Module):
         # Attention map
         psi = self.psi(psi)
         
-        # Apply attention
-        return x * psi
+        # Apply attention 
+        return x * psi  
 class TextDetectionModel(nn.Module):
     """U-Net inspired architecture for text detection in receipts"""
     def __init__(self, in_channels=3, out_channels=1):
@@ -145,29 +148,35 @@ class TextDetectionModel(nn.Module):
         )
     
     def forward(self, x):
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
+        # Contracting path
+        x1 = self.inc(x)  # Output: 64 channels
+        x2 = self.down1(x1)  # Output: 128 channels
+        x3 = self.down2(x2)  # Output: 256 channels
+        x4 = self.down3(x3)  # Output: 512 channels
+        x5 = self.down4(x4)  # Output: 1024 channels
         
         # Apply attention mechanism to skip connections
-        x4_att = self.att1(x4, x5)
-        x = self.up1(x5, x4_att)
+        # Make sure x4_att has the same number of channels as x4 (512)
+        x4_att = self.att1(x4, x5)  # Important: This should output 512 channels
         
-        x3_att = self.att2(x3, x)
-        x = self.up2(x, x3_att)
+        # Here x5 has 1024 channels, x4_att has 512 channels
+        x = self.up1(x5, x4_att)  # Output: 512 channels
         
-        x2_att = self.att3(x2, x)
-        x = self.up3(x, x2_att)
+        # Continue similarly with the rest of the upsampling path
+        # Making sure channel dimensions match at each step
+        x3_att = self.att2(x3, x)  # Input: x3 (256 channels), x (512 channels)
+        x = self.up2(x, x3_att)  # Output: 256 channels
         
-        x1_att = self.att4(x1, x)
-        x = self.up4(x, x1_att)
+        x2_att = self.att3(x2, x)  # Input: x2 (128 channels), x (256 channels)
+        x = self.up3(x, x2_att)  # Output: 128 channels
+        
+        x1_att = self.att4(x1, x)  # Input: x1 (64 channels), x (128 channels)
+        x = self.up4(x, x1_att)  # Output: 64 channels
         
         # Output prediction maps
-        text_map = torch.sigmoid(self.outc(x))
-        confidence = torch.sigmoid(self.confidence(x))
-        bbox_coords = torch.sigmoid(self.box_regressor(x))
+        text_map = torch.sigmoid(self.outc(x))  # Input: 64 channels
+        confidence = torch.sigmoid(self.confidence(x))  # Input: 64 channels
+        bbox_coords = torch.sigmoid(self.box_regressor(x))  # Input: 64 channels
         
         return {
             'text_map': text_map,
