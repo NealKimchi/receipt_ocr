@@ -157,42 +157,49 @@ def create_target_tensor(text, charset_mapper, max_length=32):
 
 
 def collate_text_recognition_batch(batch):
-    """
-    Custom collate function for text recognition with variable-length text crops
-    Args:
-        batch: List of samples with 'image', 'text', 'length'
-    Returns:
-        Collated batch dictionary
-    """
-    # Collect items of the same type together
+    """Collate function for text recognition batches"""
+    # Separate data
     images = []
     texts = []
+    raw_texts = []
     lengths = []
+    image_ids = []
     
     for sample in batch:
-        images.append(sample['image'])
-        texts.append(sample['text'])
-        lengths.append(sample['length'])
+        if sample is not None:
+            images.append(sample['image'])
+            texts.append(sample['text'])
+            raw_texts.append(sample['raw_text'])
+            lengths.append(sample['length'])
+            image_ids.append(sample['image_id'])
     
-    # Find max height and width in batch
-    max_height = max([img.shape[1] for img in images])
-    max_width = max([img.shape[2] for img in images])
+    # Convert to tensors
+    images = torch.stack(images, dim=0)
     
-    # Pad images to same size
-    padded_images = []
-    for img in images:
-        c, h, w = img.shape
-        padded = torch.zeros((c, max_height, max_width), dtype=img.dtype)
-        padded[:, :h, :w] = img
-        padded_images.append(padded)
+    # Handle text data - this is likely where your error is occurring
+    # Make sure texts are proper tensors before stacking
+    if isinstance(texts[0], torch.Tensor):
+        # If already tensors, pad to max length
+        max_length = max(len(text) for text in texts)
+        padded_texts = []
+        for text in texts:
+            if len(text) < max_length:
+                # Pad with zeros (blank tokens)
+                padding = torch.zeros(max_length - len(text), dtype=text.dtype)
+                text = torch.cat([text, padding])
+            padded_texts.append(text)
+        texts = torch.stack(padded_texts, dim=0)
+    else:
+        # If not tensors, convert lists to tensors
+        texts = torch.tensor(texts, dtype=torch.long)
     
-    # Stack tensors
-    images = torch.stack(padded_images, dim=0)
+    # Convert lengths to tensor
     lengths = torch.tensor(lengths, dtype=torch.long)
     
-    # Return as dictionary
     return {
         'image': images,
         'text': texts,
-        'length': lengths
+        'raw_text': raw_texts,
+        'length': lengths,
+        'image_id': image_ids
     }

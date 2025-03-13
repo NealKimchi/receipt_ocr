@@ -317,8 +317,19 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
     for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch}")):
         # Move data to device
         images = batch['image'].to(device)
-        texts = batch['text'].to(device)
-        lengths = batch['length'].to(device)
+        
+        # Make sure text is a tensor before moving to device
+        if isinstance(batch['text'], list):
+            # Convert list to tensor
+            texts = torch.tensor(batch['text'], dtype=torch.long).to(device)
+        else:
+            texts = batch['text'].to(device)
+        
+        # Make sure length is a tensor
+        if isinstance(batch['length'], list):
+            lengths = torch.tensor(batch['length'], dtype=torch.long).to(device)
+        else:
+            lengths = batch['length'].to(device)
         
         # Zero gradients
         optimizer.zero_grad()
@@ -375,8 +386,15 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
         for i in range(len(texts)):
             # Get prediction and target
             pred_text = charset_mapper.decode(predictions[i])
-            # Slice target to actual length
-            target_text = charset_mapper.decode(texts[i][:lengths[i]])
+            
+            # Handle different tensor formats for texts
+            if texts.dim() == 2:
+                # If texts is a 2D tensor (batch_size, seq_length)
+                # Slice target to actual length
+                target_text = charset_mapper.decode(texts[i][:lengths[i]])
+            else:
+                # If somehow texts is a 1D tensor or other format
+                target_text = charset_mapper.decode(texts[i])
             
             # Check if correct (exact match)
             if pred_text == target_text:
@@ -399,13 +417,20 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
         # Visualize predictions periodically
         vis_interval = config['training']['visualization_interval']
         if (batch_idx + 1) % vis_interval == 0:
-            # Get some predictions to visualize
-            pred_texts = [charset_mapper.decode(pred) for pred in predictions[:8]]
-            target_texts = [charset_mapper.decode(texts[i][:lengths[i]]) for i in range(min(8, len(texts)))]
-            
-            # Save visualization
-            vis_path = os.path.join(config['paths']['output_dir'], f"train_vis_epoch{epoch}_batch{batch_idx}.png")
-            visualize_predictions(images[:8], pred_texts, target_texts, save_path=vis_path)
+            try:
+                # Get some predictions to visualize
+                pred_texts = [charset_mapper.decode(pred) for pred in predictions[:8]]
+                
+                if texts.dim() == 2:
+                    target_texts = [charset_mapper.decode(texts[i][:lengths[i]]) for i in range(min(8, len(texts)))]
+                else:
+                    target_texts = [charset_mapper.decode(texts[i]) for i in range(min(8, len(texts)))]
+                
+                # Save visualization
+                vis_path = os.path.join(config['paths']['output_dir'], f"train_vis_epoch{epoch}_batch{batch_idx}.png")
+                visualize_predictions(images[:8], pred_texts, target_texts, save_path=vis_path)
+            except Exception as e:
+                print(f"Warning: Visualization failed - {e}")
     
     # Average training loss for this epoch
     avg_train_loss = epoch_loss / len(train_loader)
@@ -434,8 +459,19 @@ def validate(model, val_loader, criterion, device, epoch, config, charset_mapper
         for batch_idx, batch in enumerate(tqdm(val_loader, desc=f"Validation Epoch {epoch}")):
             # Move data to device
             images = batch['image'].to(device)
-            texts = batch['text'].to(device)
-            lengths = batch['length'].to(device)
+            
+            # Make sure text is a tensor before moving to device
+            if isinstance(batch['text'], list):
+                # Convert list to tensor
+                texts = torch.tensor(batch['text'], dtype=torch.long).to(device)
+            else:
+                texts = batch['text'].to(device)
+            
+            # Make sure length is a tensor
+            if isinstance(batch['length'], list):
+                lengths = torch.tensor(batch['length'], dtype=torch.long).to(device)
+            else:
+                lengths = batch['length'].to(device)
             
             # Forward pass
             outputs = model(images)
@@ -454,23 +490,36 @@ def validate(model, val_loader, criterion, device, epoch, config, charset_mapper
             # Get predictions and targets for metrics
             predictions = outputs['predictions']
             for i in range(len(texts)):
-                # Get prediction and target
+                # Get prediction
                 pred_text = charset_mapper.decode(predictions[i])
-                # Slice target to actual length
-                target_text = charset_mapper.decode(texts[i][:lengths[i]])
+                
+                # Handle different tensor formats for texts
+                if texts.dim() == 2:
+                    # If texts is a 2D tensor (batch_size, seq_length)
+                    target_text = charset_mapper.decode(texts[i][:lengths[i]])
+                else:
+                    # If somehow texts is a 1D tensor or other format
+                    target_text = charset_mapper.decode(texts[i])
                 
                 all_predictions.append(pred_text)
                 all_targets.append(target_text)
             
             # Visualize predictions on first validation batch
             if batch_idx == 0:
-                # Get some predictions to visualize
-                pred_texts = [charset_mapper.decode(pred) for pred in predictions[:8]]
-                target_texts = [charset_mapper.decode(texts[i][:lengths[i]]) for i in range(min(8, len(texts)))]
-                
-                # Save visualization
-                vis_path = os.path.join(config['paths']['output_dir'], f"val_vis_epoch{epoch}.png")
-                visualize_predictions(images[:8], pred_texts, target_texts, save_path=vis_path)
+                try:
+                    # Get some predictions to visualize
+                    pred_texts = [charset_mapper.decode(pred) for pred in predictions[:8]]
+                    
+                    if texts.dim() == 2:
+                        target_texts = [charset_mapper.decode(texts[i][:lengths[i]]) for i in range(min(8, len(texts)))]
+                    else:
+                        target_texts = [charset_mapper.decode(texts[i]) for i in range(min(8, len(texts)))]
+                    
+                    # Save visualization
+                    vis_path = os.path.join(config['paths']['output_dir'], f"val_vis_epoch{epoch}.png")
+                    visualize_predictions(images[:8], pred_texts, target_texts, save_path=vis_path)
+                except Exception as e:
+                    print(f"Warning: Validation visualization failed - {e}")
     
     # Average validation loss
     avg_val_loss = val_loss / len(val_loader)
