@@ -80,18 +80,26 @@ class TextDetectionModel(nn.Module):
         self.up3 = UpBlock(128, 64)
         self.up4 = UpBlock(64, 64)
         
-        # Output layer - produces two channels:
-        # 1. Text/non-text segmentation map
-        # 2. Character linking map for box generation
+        # Output layer - produces segmentation mask
         self.outc = nn.Conv2d(64, out_channels, kernel_size=1)
         
-        # Confidence prediction
-        self.confidence = nn.Conv2d(64, 1, kernel_size=1)
+        # Enhanced confidence prediction with additional layers
+        self.confidence = nn.Sequential(
+            ConvBlock(64, 32),
+            nn.Conv2d(32, 1, kernel_size=1),
+        )
         
-        # Box regression (x1, y1, x2, y2)
-        self.box_regressor = nn.Conv2d(64, 4, kernel_size=1)
+        # Enhanced box regression with additional layers
+        self.box_regressor = nn.Sequential(
+            ConvBlock(64, 64),
+            ConvBlock(64, 32),
+            nn.Conv2d(32, 4, kernel_size=1)
+        )
     
     def forward(self, x):
+        # Print input shape for debugging
+        print(f"Input image shape: {x.shape}")
+        
         # Contracting path
         x1 = self.inc(x)
         x2 = self.down1(x1)
@@ -107,13 +115,17 @@ class TextDetectionModel(nn.Module):
         
         # Output prediction maps
         text_map = torch.sigmoid(self.outc(x))
+        
+        # Confidence scores [0,1]
         confidence = torch.sigmoid(self.confidence(x))
-        bbox_coords = self.box_regressor(x)
+        
+        # Box coordinates [0,1] for x1,y1,x2,y2
+        bbox_coords = torch.sigmoid(self.box_regressor(x))
         
         return {
-            'text_map': text_map,
-            'confidence': confidence,
-            'bbox_coords': bbox_coords
+            'text_map': text_map,          # Text/non-text binary map
+            'confidence': confidence,      # Confidence scores
+            'bbox_coords': bbox_coords     # Bounding box coordinates (normalized)
         }
 
 def get_model(in_channels=3, out_channels=1):

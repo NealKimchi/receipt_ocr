@@ -710,11 +710,11 @@ def main():
     """Main training function with hardcoded parameters"""
     # Hardcoded configuration
     hf_dataset = "mychen76/invoices-and-receipts_ocr_v2"
-    save_dir = "detection_model_output"
+    save_dir = "detection_model_output_enhanced"  # New directory for enhanced model
     experiment_name = "text_detection_enhanced"
     batch_size = 4
     num_epochs = 5
-    learning_rate = 0.005  # Increased from 0.001 to 0.005
+    learning_rate = 0.005  # Increased learning rate
     image_size = (512, 512)
     max_samples = None  # Set to a number for debugging (e.g., 100)
     
@@ -725,7 +725,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Get data loaders (training only for now)
+    # Get data loaders
     print("Loading data...")
     train_loader, _ = get_data_loaders(
         dataset_name=hf_dataset,
@@ -739,7 +739,7 @@ def main():
     model = get_model(in_channels=3, out_channels=1).to(device)
     
     # Create enhanced loss function with higher box weight
-    loss_fn = get_loss_function(text_map_weight=1.0, box_weight=5.0, confidence_weight=0.5)
+    loss_fn = get_loss_function(text_map_weight=1.0, box_weight=20.0, confidence_weight=0.5)
     
     # Create optimizer with weight decay
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=0.0001)
@@ -748,7 +748,7 @@ def main():
     from torch.optim.lr_scheduler import CosineAnnealingLR
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=learning_rate/10)
     
-    # Train model (without validation for now)
+    # Train model
     print("Starting training...")
     model, history = train_model(
         model=model,
