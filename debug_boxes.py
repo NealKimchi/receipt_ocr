@@ -1,4 +1,4 @@
-# save as debug_boxes.py
+# save as debug_boxes_simple.py
 from datasets import load_dataset
 import json
 
@@ -6,44 +6,43 @@ def debug_raw_data():
     # Load the dataset
     dataset = load_dataset("mychen76/invoices-and-receipts_ocr_v2", split='train')
     
-    # Try the first 10 samples
-    for idx in range(10):
+    # Try the first 5 samples
+    for idx in range(5):
         sample = dataset[idx]
         print(f"\nSample {idx}")
         
         if 'raw_data' in sample:
-            # Check if raw_data is a string
-            if isinstance(sample['raw_data'], str):
-                # Try to parse as JSON
+            raw_data = sample['raw_data']
+            print(f"Raw data type: {type(raw_data)}")
+            
+            # If raw_data is a string, try to parse it as JSON
+            if isinstance(raw_data, str):
                 try:
-                    data = json.loads(sample['raw_data'])
-                    print(f"Successfully parsed raw_data as JSON")
+                    # Just print the raw string for manual inspection
+                    print(f"Raw data preview: {raw_data[:200]}...")
                     
-                    # Check if ocr_boxes exists
+                    # Try to parse as JSON
+                    data = json.loads(raw_data)
+                    print(f"Successfully parsed as JSON")
+                    
+                    # Print the keys in the JSON
+                    if isinstance(data, dict):
+                        print(f"JSON keys: {list(data.keys())}")
+                    
+                    # Check if ocr_boxes exists and print its type
                     if 'ocr_boxes' in data:
-                        boxes = data['ocr_boxes']
-                        print(f"Found ocr_boxes, length: {len(boxes)}")
+                        print(f"ocr_boxes type: {type(data['ocr_boxes'])}")
+                        print(f"ocr_boxes length: {len(data['ocr_boxes'])}")
                         
-                        # Print the first box directly
-                        if len(boxes) > 0:
-                            print(f"First box raw: {boxes[0]}")
-                            
-                            # Try to access expected elements
-                            try:
-                                polygon = boxes[0][0]
-                                text_conf = boxes[0][1]
-                                print(f"Polygon: {polygon}")
-                                print(f"Text and confidence: {text_conf}")
-                            except (IndexError, TypeError) as e:
-                                print(f"Error accessing box elements: {e}")
-                    else:
-                        print("No 'ocr_boxes' found in parsed raw_data")
+                        # Print the raw form of the first box for inspection
+                        if len(data['ocr_boxes']) > 0:
+                            print(f"First box raw: {data['ocr_boxes'][0]}")
                 except json.JSONDecodeError as e:
-                    print(f"Error parsing raw_data as JSON: {e}")
+                    print(f"Error parsing as JSON: {e}")
             else:
-                print(f"raw_data is not a string, type: {type(sample['raw_data'])}")
+                print("Raw data is not a string")
         else:
-            print("No 'raw_data' field found")
+            print("No raw_data field found")
 
 if __name__ == "__main__":
     debug_raw_data()
