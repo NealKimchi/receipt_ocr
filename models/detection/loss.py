@@ -153,7 +153,6 @@ class DiceBCELoss(nn.Module):
         # Combine losses
         return 0.5 * bce_loss + 0.5 * dice_loss
 
-
 class IoULoss(nn.Module):
     """IoU-based loss for bounding box regression"""
     def __init__(self):

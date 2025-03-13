@@ -24,7 +24,7 @@ from models.detection.metrics import calculate_detection_metrics
 def visualize_predictions(image, outputs, batch, index, device, save_path=None):
     """Visualize predictions for debugging"""
     # Convert tensors to numpy for visualization
-    image_np = image.cpu().permute(1, 2, 0).numpy()
+    image_np = image.detach().cpu().permute(1, 2, 0).numpy()
     
     # Standardize image for display
     mean = np.array([0.485, 0.456, 0.406])
@@ -32,14 +32,14 @@ def visualize_predictions(image, outputs, batch, index, device, save_path=None):
     image_np = std * image_np + mean
     image_np = np.clip(image_np, 0, 1)
     
-    # Get text map prediction
-    text_map_pred = outputs['text_map'][index, 0].cpu().numpy()
+    # Get text map prediction - detach from computational graph
+    text_map_pred = outputs['text_map'][index, 0].detach().cpu().numpy()
     
-    # Get confidence prediction
-    conf_pred = outputs['confidence'][index, 0].cpu().numpy()
+    # Get confidence prediction - detach from computational graph
+    conf_pred = outputs['confidence'][index, 0].detach().cpu().numpy()
     
-    # Get box predictions
-    bbox_pred = outputs['bbox_coords'][index].cpu().numpy()
+    # Get box predictions - detach from computational graph
+    bbox_pred = outputs['bbox_coords'][index].detach().cpu().numpy()
     
     # Get ground truth text map
     text_map_gt = batch['text_map'][index, 0].cpu().numpy()
@@ -99,7 +99,7 @@ def visualize_predictions(image, outputs, batch, index, device, save_path=None):
     # Draw ground truth boxes
     for box in gt_boxes:
         if isinstance(box, torch.Tensor):
-            box = box.cpu().numpy()
+            box = box.detach().cpu().numpy()
             
         x1, y1, x2, y2 = box
         
@@ -120,7 +120,6 @@ def visualize_predictions(image, outputs, batch, index, device, save_path=None):
         plt.close()
     else:
         plt.show()
-
 
 def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config, output_dir):
     """Train for one epoch"""
@@ -181,7 +180,6 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
     print(f"Epoch {epoch} completed in {elapsed_time:.2f}s - Train Loss: {avg_train_loss:.4f}")
     
     return avg_train_loss, batch_losses
-
 
 def validate(model, val_loader, criterion, device, epoch, config, output_dir):
     """Validate the model"""
@@ -269,7 +267,6 @@ def validate(model, val_loader, criterion, device, epoch, config, output_dir):
           f"IoU: {metrics['iou']:.4f}")
     
     return avg_val_loss, metrics
-
 
 def train_model(config, output_dir):
     """Train the text detection model"""
@@ -439,7 +436,6 @@ def train_model(config, output_dir):
         'metrics': metrics_history,
         'best_val_loss': best_val_loss
     }
-
 
 def main():
     """Main function"""

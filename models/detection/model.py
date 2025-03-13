@@ -16,7 +16,6 @@ class ConvBlock(nn.Module):
         x = self.relu(x)
         return x
 
-
 class DownBlock(nn.Module):
     """Downsampling block with max pooling and double convolution"""
     def __init__(self, in_channels, out_channels):
