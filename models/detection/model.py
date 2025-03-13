@@ -30,18 +30,21 @@ class DownBlock(nn.Module):
         x = self.conv2(x)
         return x
 
+# Fix for the UpBlock class
 class UpBlock(nn.Module):
     """Upsampling block with transposed convolution and double convolution"""
     def __init__(self, in_channels, out_channels):
         super(UpBlock, self).__init__()
+        # Transpose convolution reduces channels by half
         self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
         
-        # Important: After concatenation, we have in_channels // 2 + out_channels
-        # channels, not in_channels // 2 + in_channels as you might have written
+        # After concatenation, we have (in_channels // 2 + out_channels) channels
         self.conv1 = ConvBlock(in_channels // 2 + out_channels, out_channels)
         self.conv2 = ConvBlock(out_channels, out_channels)
     
     def forward(self, x1, x2):
+        # x1 is from the deeper layer (e.g., from down path)
+        # x2 is the skip connection from the encoder
         x1 = self.up(x1)
         
         # Adjust dimensions if needed
@@ -52,6 +55,7 @@ class UpBlock(nn.Module):
                         diff_y // 2, diff_y - diff_y // 2])
         
         # Concatenate along channel dimension
+        # Important: The order matters here. The skip connection (x2) should come first
         x = torch.cat([x2, x1], dim=1)
         x = self.conv1(x)
         x = self.conv2(x)
@@ -154,28 +158,28 @@ class TextDetectionModel(nn.Module):
             nn.Conv2d(32, 4, kernel_size=1)
         )
     
+    # Modified TextDetectionModel forward method to ensure correct dimensions
     def forward(self, x):
-        # Contracting path
+        # Contracting path remains the same
         x1 = self.inc(x)  # Output: 64 channels
         x2 = self.down1(x1)  # Output: 128 channels
         x3 = self.down2(x2)  # Output: 256 channels
         x4 = self.down3(x3)  # Output: 512 channels
         x5 = self.down4(x4)  # Output: 1024 channels
         
-        # Attention mechanism: gating signal is from the deeper layer
-        # and skip connection is from the encoder path
-        x4_att = self.att1(x5, x4)  # Gating signal: x5, Skip connection: x4
+        # Apply attention before upsampling
+        x4_att = self.att1(x5, x4)  # Output: x4 with attention applied (still 512 channels)
         
-        # Up path with attended features
+        # Upsampling path with correct attention handling
         x = self.up1(x5, x4_att)  # Output: 512 channels
         
-        x3_att = self.att2(x, x3)  # Gating signal: x, Skip connection: x3
+        x3_att = self.att2(x, x3)  # Apply attention to x3 (256 channels)
         x = self.up2(x, x3_att)  # Output: 256 channels
         
-        x2_att = self.att3(x, x2)  # Gating signal: x, Skip connection: x2
+        x2_att = self.att3(x, x2)  # Apply attention to x2 (128 channels)
         x = self.up3(x, x2_att)  # Output: 128 channels
         
-        x1_att = self.att4(x, x1)  # Gating signal: x, Skip connection: x1
+        x1_att = self.att4(x, x1)  # Apply attention to x1 (64 channels)
         x = self.up4(x, x1_att)  # Output: 64 channels
         
         # Output prediction maps
