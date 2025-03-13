@@ -710,14 +710,12 @@ def main():
     # Hardcoded configuration
     hf_dataset = "mychen76/invoices-and-receipts_ocr_v2"
     save_dir = "detection_model_output"
-    experiment_name = "text_detection"
-    batch_size = 4  # Keep batch size small for training
-    val_batch_size = 1  # Use batch size of 1 for validation to save memory
+    experiment_name = "text_detection_enhanced"
+    batch_size = 4
     num_epochs = 5
-    learning_rate = 0.001
+    learning_rate = 0.005  # Increased from 0.001 to 0.005
     image_size = (512, 512)
     max_samples = None  # Set to a number for debugging (e.g., 100)
-    val_samples = 50  # Limit validation to a smaller subset
     
     print(f"Using Hugging Face dataset: {hf_dataset}")
     print(f"Saving results to: {save_dir}")
@@ -726,8 +724,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Get training loader
-    print("Loading training data...")
+    # Get data loaders (training only for now)
+    print("Loading data...")
     train_loader, _ = get_data_loaders(
         dataset_name=hf_dataset,
         batch_size=batch_size,
@@ -735,34 +733,26 @@ def main():
         max_samples=max_samples
     )
     
-    # Create a separate, smaller validation loader
-    print("Loading validation data (limited subset)...")
-    _, full_val_loader = get_data_loaders(
-        dataset_name=hf_dataset,
-        batch_size=val_batch_size,  # Smaller batch size
-        image_size=image_size,
-        max_samples=val_samples  # Use fewer samples
-    )
-    
     # Create model
     print("Creating model...")
     model = get_model(in_channels=3, out_channels=1).to(device)
     
-    # Create loss function
-    loss_fn = get_loss_function(text_map_weight=1.0, box_weight=1.0, confidence_weight=0.5)
+    # Create enhanced loss function with higher box weight
+    loss_fn = get_loss_function(text_map_weight=1.0, box_weight=5.0, confidence_weight=0.5)
     
-    # Create optimizer
+    # Create optimizer with weight decay
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=0.0001)
     
-    # Create scheduler
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    # Create a better scheduler - CosineAnnealingLR
+    from torch.optim.lr_scheduler import CosineAnnealingLR
+    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=learning_rate/10)
     
-    # Train model
+    # Train model (without validation for now)
     print("Starting training...")
     model, history = train_model(
         model=model,
         train_loader=train_loader,
-        val_loader=full_val_loader,
+        val_loader=None,  # Skip validation for now
         loss_fn=loss_fn,
         optimizer=optimizer,
         scheduler=scheduler,

@@ -165,7 +165,7 @@ class IoULoss(nn.Module):
         return iou_loss
 
 
-def get_loss_function(text_map_weight=1.0, box_weight=1.0, confidence_weight=0.5):
+def get_loss_function(text_map_weight=1.0, box_weight=5.0, confidence_weight=0.5):
     """Helper function to create the loss function"""
     return TextDetectionLoss(
         text_map_weight=text_map_weight,
