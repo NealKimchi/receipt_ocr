@@ -104,9 +104,6 @@ class TextDetectionModel(nn.Module):
         Returns:
             dict: Dictionary containing 'text_map', 'confidence', and 'bbox_coords'
         """
-        # Print input shape for debugging
-        print(f"Input image shape: {x.shape}")
-        
         # Contracting path
         x1 = self.inc(x)
         x2 = self.down1(x1)

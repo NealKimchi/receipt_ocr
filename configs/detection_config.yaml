@@ -18,13 +18,18 @@ training:
   save_interval: 5
   eval_interval: 1
   num_workers: 4
+  log_interval: 10
+  visualization_interval: 50
+  use_scheduler: true
 
 data:
+  dataset_name: "mychen76/invoices-and-receipts_ocr_v2"
   image_size: [512, 512]
   data_dir: 'data/'
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
+  max_samples: null  # Set to a number for testing, null for full dataset
   augmentation:
     rotation_range: 10
     brightness_contrast_range: 0.2
@@ -32,7 +37,7 @@ data:
 
 loss:
   text_map_weight: 1.0
-  box_weight: 1.0
+  box_weight: 10.0  # Increased from 1.0 to 10.0 for better box detection
   confidence_weight: 0.5
   dice_bce_ratio: 0.5
 

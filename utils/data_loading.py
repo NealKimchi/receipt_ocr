@@ -8,6 +8,7 @@ import cv2
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from datasets import load_dataset
+import re
 
 class ReceiptDataset(Dataset):
     """Dataset for receipt OCR text detection"""
@@ -35,7 +36,7 @@ class ReceiptDataset(Dataset):
             
         print(f"Loaded {len(self.dataset)} samples for {split} split")
         
-        # Define transforms for images only - no bounding boxes
+        # Define transforms for images and masks
         self.transforms = A.Compose([
             A.Resize(height=image_size[0], width=image_size[1]),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -54,85 +55,43 @@ class ReceiptDataset(Dataset):
         original_h, original_w = image.shape[:2]
         
         # Extract OCR boxes from raw_data
-        boxes = []
-        if 'raw_data' in sample:
-            try:
-                # Parse raw_data as JSON
-                import json
-                raw_data = json.loads(sample['raw_data'])
-                
-                # Extract ocr_boxes
-                if 'ocr_boxes' in raw_data:
-                    ocr_boxes = raw_data['ocr_boxes']
-                    
-                    # Process each box
-                    for box_data in ocr_boxes:
-                        try:
-                            # Defensive coding to handle different formats
-                            if not isinstance(box_data, list) or len(box_data) < 2:
-                                continue
-                                
-                            polygon = box_data[0]
-                            text_conf = box_data[1]
-                            
-                            # Verify polygon has valid structure
-                            if not isinstance(polygon, list) or len(polygon) < 4:
-                                continue
-                                
-                            # Extract x,y coordinates safely
-                            try:
-                                x_vals = []
-                                y_vals = []
-                                for point in polygon:
-                                    if isinstance(point, list) and len(point) >= 2:
-                                        x_vals.append(float(point[0]))
-                                        y_vals.append(float(point[1]))
-                                
-                                if len(x_vals) < 2 or len(y_vals) < 2:
-                                    continue
-                                    
-                                x1, y1 = min(x_vals), min(y_vals)
-                                x2, y2 = max(x_vals), max(y_vals)
-                            except (IndexError, ValueError, TypeError):
-                                continue
-                            
-                            # Extract confidence safely
-                            try:
-                                if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
-                                    conf = float(text_conf[1])
-                                else:
-                                    conf = 1.0
-                            except (IndexError, ValueError, TypeError):
-                                conf = 1.0
-                            
-                            # Create normalized box [conf, x1, y1, x2, y2]
-                            norm_x1 = float(x1) / original_w
-                            norm_y1 = float(y1) / original_h
-                            norm_x2 = float(x2) / original_w
-                            norm_y2 = float(y2) / original_h
-                            
-                            # Add to boxes list
-                            boxes.append([conf, norm_x1, norm_y1, norm_x2, norm_y2])
-                        except Exception as e:
-                            # Silently ignore problematic boxes
-                            pass
-            except Exception as e:
-                print(f"Error parsing raw_data: {e}")
+        words, boxes, confidences = self._parse_raw_data(sample)
         
         # Create text map based on boxes
         text_map = np.zeros((original_h, original_w), dtype=np.float32)
+        valid_boxes = []
+        
         for box in boxes:
-            _, x1, y1, x2, y2 = box
+            x1, y1, x2, y2 = box
+            
             # Convert to absolute pixel coordinates
-            x1_px, y1_px = int(x1 * original_w), int(y1 * original_h)
-            x2_px, y2_px = int(x2 * original_w), int(y2 * original_h)
+            x1_px, y1_px = int(x1), int(y1)
+            x2_px, y2_px = int(x2), int(y2)
+            
             # Ensure valid coordinates
+            if x2_px <= x1_px or y2_px <= y1_px:
+                continue
+                
             x1_px = max(0, min(x1_px, original_w-1))
             y1_px = max(0, min(y1_px, original_h-1))
             x2_px = max(x1_px+1, min(x2_px, original_w))
             y2_px = max(y1_px+1, min(y2_px, original_h))
+            
+            # Add to valid boxes
+            valid_boxes.append([x1_px, y1_px, x2_px, y2_px])
+            
             # Fill text map
             text_map[y1_px:y2_px, x1_px:x2_px] = 1.0
+        
+        # Normalize valid boxes
+        normalized_boxes = []
+        for box in valid_boxes:
+            x1, y1, x2, y2 = box
+            norm_x1 = float(x1) / original_w
+            norm_y1 = float(y1) / original_h
+            norm_x2 = float(x2) / original_w
+            norm_y2 = float(y2) / original_h
+            normalized_boxes.append([norm_x1, norm_y1, norm_x2, norm_y2])
         
         # Apply transforms
         transformed = self.transforms(image=image, mask=text_map)
@@ -144,12 +103,12 @@ class ReceiptDataset(Dataset):
         
         # Print debug info
         if idx % 100 == 0:  # Only print occasionally to reduce output
-            print(f"Sample {idx}: Found {len(boxes)} boxes")
+            print(f"Sample {idx}: Found {len(valid_boxes)} valid boxes")
         
         return {
             'image': image,
             'text_map': text_map,
-            'boxes': boxes,
+            'boxes': normalized_boxes,
             'image_id': sample.get('id', str(idx))
         }
     
@@ -176,6 +135,77 @@ class ReceiptDataset(Dataset):
         except Exception as e:
             print(f"Error loading image: {e}")
             return np.zeros((256, 256, 3), dtype=np.uint8)
+    
+    def _parse_ocr_boxes(self, ocr_boxes_str):
+        """Parse ocr_boxes string into structured data"""
+        words = []
+        boxes = []
+        confidences = []
+        
+        # Extract each box using regex
+        box_pattern = r"\[\[\[(.*?)\]\], \((.*?)\)\]"
+        matches = re.findall(box_pattern, ocr_boxes_str)
+        
+        for coords_str, text_conf_str in matches:
+            try:
+                # Parse coordinates
+                coords_pattern = r"(\d+\.\d+), (\d+\.\d+)"
+                coord_matches = re.findall(coords_pattern, coords_str)
+                
+                if not coord_matches or len(coord_matches) < 3:
+                    continue
+                    
+                # Extract points
+                points = []
+                for x_str, y_str in coord_matches:
+                    points.append([float(x_str), float(y_str)])
+                
+                # Calculate bounding box
+                x_vals = [p[0] for p in points]
+                y_vals = [p[1] for p in points]
+                x1, y1 = min(x_vals), min(y_vals)
+                x2, y2 = max(x_vals), max(y_vals)
+                
+                # Parse text and confidence
+                text_conf_pattern = r"'(.*?)', ([\d\.]+)"
+                text_conf_match = re.search(text_conf_pattern, text_conf_str)
+                
+                if text_conf_match:
+                    text = text_conf_match.group(1)
+                    conf = float(text_conf_match.group(2))
+                    
+                    # Add to lists
+                    words.append(text)
+                    boxes.append([x1, y1, x2, y2])
+                    confidences.append(conf)
+            except Exception as e:
+                # Silently ignore problematic boxes
+                continue
+        
+        return words, boxes, confidences
+    
+    def _parse_raw_data(self, sample):
+        """Parse raw_data field to extract words, boxes, and confidences"""
+        words = []
+        boxes = []
+        confidences = []
+        
+        if 'raw_data' not in sample:
+            return words, boxes, confidences
+            
+        try:
+            raw_data = json.loads(sample['raw_data'])
+            
+            if 'ocr_boxes' in raw_data:
+                ocr_boxes_str = raw_data['ocr_boxes']
+                words, boxes, confidences = self._parse_ocr_boxes(ocr_boxes_str)
+                        
+            return words, boxes, confidences
+            
+        except Exception as e:
+            # If there's an error, just return empty lists
+            return words, boxes, confidences
+
 
 def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2", 
                      batch_size=8, image_size=(512, 512), num_workers=4, 
@@ -201,27 +231,13 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
         cache_dir=cache_dir
     )
     
-    # Custom collate function
-    def collate_fn(batch):
-        images = torch.stack([item['image'] for item in batch])
-        text_maps = torch.stack([item['text_map'] for item in batch])
-        boxes = [item['boxes'] for item in batch]
-        image_ids = [item['image_id'] for item in batch]
-        
-        return {
-            'image': images,
-            'text_map': text_maps,
-            'boxes': boxes,
-            'image_id': image_ids
-        }
-    
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        collate_fn=collate_fn
+        collate_fn=None  # Use default collate_fn as we're returning a dict
     )
     
     val_loader = DataLoader(
@@ -229,7 +245,7 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        collate_fn=collate_fn
+        collate_fn=None  # Use default collate_fn as we're returning a dict
     )
     
     return train_loader, val_loader

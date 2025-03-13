@@ -17,14 +17,6 @@ class TextDetectionLoss(nn.Module):
         self.confidence_loss = nn.BCELoss()
     
     def forward(self, predictions, targets):
-        """
-        Args:
-            predictions (dict): Model predictions containing 'text_map', 'confidence', 'bbox_coords'
-            targets (dict): Target values containing 'text_map', 'boxes'
-        
-        Returns:
-            dict: Loss values including 'total_loss', 'text_map_loss', 'box_loss', 'confidence_loss'
-        """
         # Text map segmentation loss
         text_map_loss = self.text_map_loss(predictions['text_map'], targets['text_map'])
         
@@ -41,142 +33,89 @@ class TextDetectionLoss(nn.Module):
             pred_conf = predictions['confidence'][i]  # (1, H, W)
             pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
             
-            # Print prediction information
-            print(f"Sample {i}, Predicted bbox_coords shape: {pred_boxes.shape}")
-            
-            # Get image dimensions for normalization
+            # Get image dimensions for sampling
             h, w = pred_conf.shape[1:]
             
             # Check if we have target boxes for this sample
-            if 'boxes' in targets and i < len(targets['boxes']) and targets['boxes'][i] is not None:
-                # Get the boxes for this sample
+            if 'boxes' in targets and i < len(targets['boxes']) and len(targets['boxes'][i]) > 0:
+                # Get the boxes for this sample - already normalized [0,1]
                 sample_boxes = targets['boxes'][i]
+                
+                # Convert to tensor if not already
+                if not isinstance(sample_boxes, torch.Tensor):
+                    sample_boxes = torch.tensor(sample_boxes, device=text_map_loss.device)
                 
                 if len(sample_boxes) > 0:
                     valid_samples += 1
                     total_boxes += len(sample_boxes)
                     
                     # Process boxes
-                    target_conf_list = []
-                    target_boxes_list = []
+                    sampled_boxes = []
+                    sampled_conf = []
                     
-                    for box in sample_boxes:
-                        # Extract confidence and coordinates
-                        conf = box[0]
-                        x1, y1, x2, y2 = box[1:]
+                    for box_idx, box in enumerate(sample_boxes):
+                        # Box is already normalized [x1, y1, x2, y2]
+                        x1, y1, x2, y2 = box
                         
-                        # Normalize coordinates to [0,1]
-                        norm_x1 = x1 / w
-                        norm_y1 = y1 / h
-                        norm_x2 = x2 / w
-                        norm_y2 = y2 / h
+                        # Convert normalized coordinates to pixel coordinates for sampling
+                        x1_px = int(x1.item() * w)
+                        y1_px = int(y1.item() * h)
+                        x2_px = int(x2.item() * w)
+                        y2_px = int(y2.item() * h)
                         
-                        # Clamp values to ensure proper box format (0≤x1<x2≤1, 0≤y1<y2≤1)
-                        norm_x1 = max(0.0, min(0.999, norm_x1))
-                        norm_y1 = max(0.0, min(0.999, norm_y1))
-                        norm_x2 = max(norm_x1 + 0.001, min(1.0, norm_x2))
-                        norm_y2 = max(norm_y1 + 0.001, min(1.0, norm_y2))
+                        # Ensure valid pixel ranges
+                        x1_px = max(0, min(x1_px, w-1))
+                        y1_px = max(0, min(y1_px, h-1))
+                        x2_px = max(x1_px + 1, min(x2_px, w-1))
+                        y2_px = max(y1_px + 1, min(y2_px, h-1))
                         
-                        target_conf_list.append(conf)
-                        target_boxes_list.append([norm_x1, norm_y1, norm_x2, norm_y2])
+                        # Sample points: center, corners, grid points
+                        sample_points = []
+                        
+                        # Center point
+                        center_y = (y1_px + y2_px) // 2
+                        center_x = (x1_px + x2_px) // 2
+                        sample_points.append((center_y, center_x))
+                        
+                        # Corners
+                        sample_points.append((y1_px, x1_px))  # Top-left
+                        sample_points.append((y1_px, x2_px))  # Top-right
+                        sample_points.append((y2_px, x1_px))  # Bottom-left
+                        sample_points.append((y2_px, x2_px))  # Bottom-right
+                        
+                        # Filter out-of-bounds points
+                        valid_points = []
+                        for y, x in sample_points:
+                            if 0 <= y < h and 0 <= x < w:
+                                valid_points.append((y, x))
+                        
+                        # Extract predictions at each valid point
+                        for y, x in valid_points:
+                            box_pred = pred_boxes[:, y, x]
+                            conf_pred = pred_conf[0, y, x]
+                            
+                            sampled_boxes.append((box_pred, box))
+                            # Use 1.0 as confidence target for valid boxes
+                            sampled_conf.append((conf_pred, torch.tensor(1.0, device=conf_pred.device)))
                     
-                    # Create tensor for normalized boxes
-                    if len(target_boxes_list) > 0:
-                        target_boxes = torch.tensor(target_boxes_list, device=text_map_loss.device)
-                        target_conf = torch.tensor(target_conf_list, device=text_map_loss.device)
+                    # Compute box loss if we have valid sample points
+                    if sampled_boxes:
+                        pred_boxes_tensor = torch.stack([pred for pred, _ in sampled_boxes])
+                        target_boxes_tensor = torch.stack([target.to(pred_boxes_tensor.device) for _, target in sampled_boxes])
                         
-                        print(f"Sample {i}, First normalized box: {target_boxes_list[0]}")
+                        current_box_loss = self.box_loss(pred_boxes_tensor, target_boxes_tensor)
+                        box_loss += current_box_loss
                         
-                        # Sample points from each box for loss calculation
-                        sampled_boxes = []
-                        sampled_conf = []
-                        
-                        for box_idx, box in enumerate(target_boxes):
-                            x1, y1, x2, y2 = box
-                            
-                            # Convert normalized coordinates to pixel coordinates for sampling
-                            x1_px = int(x1.item() * w)
-                            y1_px = int(y1.item() * h)
-                            x2_px = int(x2.item() * w)
-                            y2_px = int(y2.item() * h)
-                            
-                            # Ensure valid pixel ranges
-                            x1_px = max(0, min(x1_px, w-1))
-                            y1_px = max(0, min(y1_px, h-1))
-                            x2_px = max(x1_px + 1, min(x2_px, w-1))
-                            y2_px = max(y1_px + 1, min(y2_px, h-1))
-                            
-                            # Sample points: center, corners, grid points
-                            sample_points = []
-                            
-                            # Center point
-                            center_y = (y1_px + y2_px) // 2
-                            center_x = (x1_px + x2_px) // 2
-                            sample_points.append((center_y, center_x))
-                            
-                            # Corners
-                            sample_points.append((y1_px, x1_px))  # Top-left
-                            sample_points.append((y1_px, x2_px))  # Top-right
-                            sample_points.append((y2_px, x1_px))  # Bottom-left
-                            sample_points.append((y2_px, x2_px))  # Bottom-right
-                            
-                            # Filter out-of-bounds points
-                            valid_points = []
-                            for y, x in sample_points:
-                                if 0 <= y < h and 0 <= x < w:
-                                    valid_points.append((y, x))
-                            
-                            print(f"Box {box_idx}, Valid sample points: {len(valid_points)}")
-                            
-                            # Extract predictions at each valid point
-                            for y, x in valid_points:
-                                box_pred = pred_boxes[:, y, x]
-                                conf_pred = pred_conf[0, y, x]
-                                
-                                sampled_boxes.append((box_pred, box))
-                                sampled_conf.append((conf_pred, target_conf[box_idx]))
-                        
-                        # Compute box loss if we have valid sample points
-                        if sampled_boxes:
-                            pred_boxes_tensor = torch.stack([pred for pred, _ in sampled_boxes])
-                            target_boxes_tensor = torch.stack([target.to(pred_boxes_tensor.device) for _, target in sampled_boxes])
-                            
-                            # Print some sample values
-                            if len(pred_boxes_tensor) > 0:
-                                print(f"Pred box sample: {pred_boxes_tensor[0]}")
-                                print(f"Target box sample: {target_boxes_tensor[0]}")
-                            
-                            # Compute individual loss components
-                            iou_loss = self.box_loss.iou_loss(pred_boxes_tensor, target_boxes_tensor)
-                            l1_loss = F.smooth_l1_loss(pred_boxes_tensor, target_boxes_tensor)
-                            giou_loss = self.box_loss.giou_loss(pred_boxes_tensor, target_boxes_tensor)
-                            
-                            # Print individual loss components
-                            print(f"IoU Loss: {iou_loss.item()}, L1 Loss: {l1_loss.item()}, GIoU Loss: {giou_loss.item()}")
-                            
-                            current_box_loss = self.box_loss(pred_boxes_tensor, target_boxes_tensor)
-                            box_loss += current_box_loss
-                            
-                            print(f"Box loss for sample {i}: {current_box_loss.item()}")
-                            
-                            # Compute confidence loss
-                            if sampled_conf:
-                                pred_conf_tensor = torch.stack([pred for pred, _ in sampled_conf])
-                                target_conf_tensor = torch.stack([target.to(pred_conf_tensor.device) for _, target in sampled_conf])
-                                confidence_loss += self.confidence_loss(pred_conf_tensor, target_conf_tensor)
-        
-        # Print summary statistics
-        print(f"Total valid samples: {valid_samples}, Total boxes: {total_boxes}")
-        print(f"Raw box loss (before averaging): {box_loss.item()}")
+                        # Compute confidence loss
+                        if sampled_conf:
+                            pred_conf_tensor = torch.stack([pred for pred, _ in sampled_conf])
+                            target_conf_tensor = torch.stack([target.to(pred_conf_tensor.device) for _, target in sampled_conf])
+                            confidence_loss += self.confidence_loss(pred_conf_tensor, target_conf_tensor)
         
         # Average losses over valid samples
         if valid_samples > 0:
             box_loss /= valid_samples
             confidence_loss /= valid_samples
-        
-        # Print final losses
-        print(f"Final box loss (after averaging): {box_loss.item()}")
-        print(f"Text map loss: {text_map_loss.item()}, Confidence loss: {confidence_loss.item()}")
         
         # Combine losses
         total_loss = (
