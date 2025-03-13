@@ -175,49 +175,54 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
         all_pred_boxes = []
         all_target_boxes = []
         
-        with torch.no_grad():
-            progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
-            for batch in progress_bar:
-                # Move data to device
-                images = batch['image'].to(device)
-                text_maps = batch['text_map'].to(device)
+    # In the validation phase part of train_model function, add memory-saving steps:
+    with torch.no_grad():
+        progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
+        for batch_idx, batch in enumerate(progress_bar):
+            # Move data to device
+            images = batch['image'].to(device)
+            text_maps = batch['text_map'].to(device)
+            
+            # Forward pass
+            predictions = model(images)
+            
+            # Calculate loss
+            loss_dict = loss_fn(predictions, {
+                'text_map': text_maps,
+                'boxes': batch['boxes']
+            })
+            
+            loss = loss_dict['total_loss']
+            
+            # Update metrics
+            val_loss += loss.item()
+            val_text_map_loss += loss_dict['text_map_loss'].item()
+            val_box_loss += loss_dict['box_loss'].item()
+            val_confidence_loss += loss_dict['confidence_loss'].item()
+            
+            # Collect predictions and targets for metrics
+            pred_maps = (predictions['text_map'] > 0.5).float()
+            all_preds.append(pred_maps.cpu())
+            all_targets.append(text_maps.cpu())
+            
+            # Collect box predictions
+            for i in range(len(images)):
+                # Get prediction map
+                pred_conf = predictions['confidence'][i]  # (1, H, W)
+                pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
                 
-                # Forward pass
-                predictions = model(images)
+                # Extract boxes using non-maximum suppression
+                detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
+                all_pred_boxes.append(detected_boxes)
                 
-                # Calculate loss
-                loss_dict = loss_fn(predictions, {
-                    'text_map': text_maps,
-                    'boxes': batch['boxes']
-                })
-                
-                loss = loss_dict['total_loss']
-                
-                # Update metrics
-                val_loss += loss.item()
-                val_text_map_loss += loss_dict['text_map_loss'].item()
-                val_box_loss += loss_dict['box_loss'].item()
-                val_confidence_loss += loss_dict['confidence_loss'].item()
-                
-                # Collect predictions and targets for metrics
-                pred_maps = (predictions['text_map'] > 0.5).float()
-                all_preds.append(pred_maps.cpu())
-                all_targets.append(text_maps.cpu())
-                
-                # Collect box predictions
-                for i in range(len(images)):
-                    # Get prediction map
-                    pred_conf = predictions['confidence'][i]  # (1, H, W)
-                    pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
-                    
-                    # Extract boxes using non-maximum suppression
-                    detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
-                    all_pred_boxes.append(detected_boxes)
-                    
-                    # Target boxes
-                    target_boxes = batch['boxes'][i]
-                    all_target_boxes.append(target_boxes)
-        
+                # Target boxes
+                target_boxes = batch['boxes'][i]
+                all_target_boxes.append(target_boxes)
+            
+            # Clear GPU cache periodically
+            if batch_idx % 5 == 0 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
         # Calculate average validation loss
         val_loss /= len(val_loader)
         val_text_map_loss /= len(val_loader)
@@ -706,11 +711,13 @@ def main():
     hf_dataset = "mychen76/invoices-and-receipts_ocr_v2"
     save_dir = "detection_model_output"
     experiment_name = "text_detection"
-    batch_size = 4
+    batch_size = 4  # Keep batch size small for training
+    val_batch_size = 1  # Use batch size of 1 for validation to save memory
     num_epochs = 5
     learning_rate = 0.001
     image_size = (512, 512)
     max_samples = None  # Set to a number for debugging (e.g., 100)
+    val_samples = 50  # Limit validation to a smaller subset
     
     print(f"Using Hugging Face dataset: {hf_dataset}")
     print(f"Saving results to: {save_dir}")
@@ -719,13 +726,22 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Get data loaders
-    print("Loading data...")
-    train_loader, val_loader = get_data_loaders(
+    # Get training loader
+    print("Loading training data...")
+    train_loader, _ = get_data_loaders(
         dataset_name=hf_dataset,
         batch_size=batch_size,
         image_size=image_size,
         max_samples=max_samples
+    )
+    
+    # Create a separate, smaller validation loader
+    print("Loading validation data (limited subset)...")
+    _, full_val_loader = get_data_loaders(
+        dataset_name=hf_dataset,
+        batch_size=val_batch_size,  # Smaller batch size
+        image_size=image_size,
+        max_samples=val_samples  # Use fewer samples
     )
     
     # Create model
@@ -746,7 +762,7 @@ def main():
     model, history = train_model(
         model=model,
         train_loader=train_loader,
-        val_loader=None,
+        val_loader=full_val_loader,
         loss_fn=loss_fn,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -758,7 +774,6 @@ def main():
     
     print("Training completed!")
     return model, history
-
 
 if __name__ == "__main__":
     main()
