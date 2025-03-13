@@ -296,7 +296,6 @@ def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
     """
     Extract bounding boxes from the model output using confidence threshold and NMS
     """
-    
     # Print shape for debugging
     print(f"Confidence map shape: {confidence_map.shape}")
     
@@ -313,14 +312,25 @@ def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
     # Threshold confidence map
     binary_map = (confidence_map > threshold).float()
     if len(binary_map.shape) > 2:
-        binary_map = binary_map[0]  # Take first channel/batch
+        binary_map = binary_map[0]  # Take first channel
+        if len(binary_map.shape) > 2:
+            binary_map = binary_map[0]  # Take first element if still more dimensions
     
     # If no detections, return empty list
     if binary_map.sum() == 0:
         return []  # Return empty list instead of None
     
-    # Get indices of high confidence points
-    y_indices, x_indices = torch.where(binary_map > 0)
+    # Get indices where binary_map > 0
+    # Fix for 'too many values to unpack' error
+    indices = torch.where(binary_map > 0)
+    if len(indices) != 2:
+        print(f"Warning: Expected 2 index arrays, got {len(indices)}. Shape of binary_map: {binary_map.shape}")
+        if len(indices) < 2:
+            return []  # Not enough indices to proceed
+        # Use only the last two dimensions (assuming these are height and width)
+        y_indices, x_indices = indices[-2], indices[-1]
+    else:
+        y_indices, x_indices = indices
     
     # Get box coordinates and confidence at those points
     boxes = []
@@ -328,7 +338,11 @@ def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
         y, x = y_indices[i], x_indices[i]
         
         # Get predicted box coordinates
-        box = box_coords[:, y, x].cpu().numpy()  # (4,)
+        # Ensure box_coords has the right shape or extract properly
+        if len(box_coords.shape) > 3:  # If box_coords has batch dimension
+            box = box_coords[0, :, y, x].cpu().numpy()  # First batch element
+        else:
+            box = box_coords[:, y, x].cpu().numpy()
         
         # Convert to absolute coordinates
         x1, y1, x2, y2 = box
@@ -338,12 +352,15 @@ def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
         y2 = min(h, y2 * h)
         
         # Get confidence score
-        conf = confidence_map[0, y, x].item()
+        if len(confidence_map.shape) > 3:  # If confidence_map has batch dimension
+            conf = confidence_map[0, 0, y, x].item()
+        else:
+            conf = confidence_map[0, y, x].item()
         
         boxes.append([x1, y1, x2, y2, conf])
     
     # Perform non-maximum suppression
-    boxes = np.array(boxes)
+    boxes = np.array(boxes) if boxes else np.zeros((0, 5))
     if len(boxes) > 0:
         # Sort by confidence
         indices = np.argsort(-boxes[:, 4])
@@ -363,7 +380,7 @@ def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
             mask = ious < nms_threshold
             boxes = boxes[1:][mask]
         
-        boxes = np.array(keep)
+        boxes = np.array(keep) if keep else np.zeros((0, 5))
     
     return boxes
 
