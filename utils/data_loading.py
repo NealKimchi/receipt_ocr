@@ -37,8 +37,17 @@ class ReceiptDataset(Dataset):
         print(f"Loaded {len(self.dataset)} samples for {split} split")
         
         # Define transforms for images and masks
-        self.transforms = A.Compose([
+        transforms = A.Compose([
             A.Resize(height=image_size[0], width=image_size[1]),
+            A.OneOf([
+                A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3),
+                A.RandomGamma(gamma_limit=(80, 120)),
+            ], p=0.5),
+            A.OneOf([
+                A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, p=0.5),
+                A.GridDistortion(p=0.5),
+                A.OpticalDistortion(distort_limit=2, shift_limit=0.5, p=0.5),
+            ], p=0.3),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2(),
         ])
