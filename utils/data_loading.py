@@ -37,7 +37,7 @@ class ReceiptDataset(Dataset):
         print(f"Loaded {len(self.dataset)} samples for {split} split")
         
         # Define transforms for images and masks
-        transforms = A.Compose([
+        self.transforms = A.Compose([
             A.Resize(height=image_size[0], width=image_size[1]),
             A.OneOf([
                 A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3),
