@@ -27,14 +27,14 @@ from utils.data_loading import get_data_loaders
 
 
 def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler, 
-                device, num_epochs=50, save_dir='checkpoints', experiment_name='text_detection'):
+                device, num_epochs=20, save_dir='checkpoints', experiment_name='text_detection'):
     """
     Train the text detection model
     
     Args:
         model: PyTorch model
         train_loader: DataLoader for training data
-        val_loader: DataLoader for validation data
+        val_loader: DataLoader for validation data (can be None to skip validation)
         loss_fn: Loss function
         optimizer: Optimizer
         scheduler: Learning rate scheduler
@@ -56,18 +56,19 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
         f.write(f"Starting training for {experiment_name}\n")
         f.write(f"Device: {device}\n")
         f.write(f"Epochs: {num_epochs}\n")
+        f.write(f"Validation: {'Disabled' if val_loader is None else 'Enabled'}\n")
         f.write("=" * 50 + "\n")
     
     # Initialize training history
     history = {
         'train_loss': [],
-        'val_loss': [],
-        'text_map_precision': [],
-        'text_map_recall': [],
-        'text_map_f1': [],
-        'box_precision': [],
-        'box_recall': [],
-        'box_f1': []
+        'val_loss': [] if val_loader is not None else None,
+        'text_map_precision': [] if val_loader is not None else None,
+        'text_map_recall': [] if val_loader is not None else None,
+        'text_map_f1': [] if val_loader is not None else None,
+        'box_precision': [] if val_loader is not None else None,
+        'box_recall': [] if val_loader is not None else None,
+        'box_f1': [] if val_loader is not None else None
     }
     
     # Track best validation loss
@@ -125,130 +126,149 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
         train_box_loss /= len(train_loader)
         train_confidence_loss /= len(train_loader)
         
-        # Only perform validation every few epochs to save memory
-        if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == num_epochs - 1:
-            # Validation phase
-            model.eval()
-            val_loss = 0.0
-            val_text_map_loss = 0.0
-            val_box_loss = 0.0
-            val_confidence_loss = 0.0
-            
-            # Metrics for segmentation
-            all_preds = []
-            all_targets = []
-            
-            # Metrics for box detection
-            all_pred_boxes = []
-            all_target_boxes = []
-            
-            with torch.no_grad():
-                progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
-                for batch in progress_bar:
-                    # Move data to device
-                    images = batch['image'].to(device)
-                    text_maps = batch['text_map'].to(device)
-                    
-                    # Forward pass
-                    predictions = model(images)
-                    
-                    # Calculate loss
-                    loss_dict = loss_fn(predictions, {
-                        'text_map': text_maps,
-                        'boxes': batch['boxes']
-                    })
-                    
-                    loss = loss_dict['total_loss']
-                    
-                    # Update metrics
-                    val_loss += loss.item()
-                    val_text_map_loss += loss_dict['text_map_loss'].item()
-                    val_box_loss += loss_dict['box_loss'].item()
-                    val_confidence_loss += loss_dict['confidence_loss'].item()
-                    
-                    # Collect predictions and targets for metrics
-                    pred_maps = (predictions['text_map'] > 0.5).float()
-                    all_preds.append(pred_maps.cpu())
-                    all_targets.append(text_maps.cpu())
-                    
-                    # Collect box predictions - process one sample at a time to save memory
-                    for i in range(len(images)):
-                        # Get prediction map
-                        pred_conf = predictions['confidence'][i]  # (1, H, W)
-                        pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
-                        
-                        # Extract boxes using non-maximum suppression
-                        detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
-                        all_pred_boxes.append(detected_boxes)
-                        
-                        # Target boxes
-                        target_boxes = batch['boxes'][i]
-                        all_target_boxes.append(target_boxes)
-                        
-                        # Clear memory
-                        torch.cuda.empty_cache() if torch.cuda.is_available() else None
-            
-            # Calculate average validation loss
-            val_loss /= len(val_loader)
-            val_text_map_loss /= len(val_loader)
-            val_box_loss /= len(val_loader)
-            val_confidence_loss /= len(val_loader)
-            
-            # Update scheduler
-            scheduler.step(val_loss)
-            
-            # Calculate text map metrics
-            text_precision, text_recall, text_f1 = calculate_segmentation_metrics(all_preds, all_targets)
-            
-            # Calculate box metrics
-            box_precision, box_recall, box_f1 = calculate_box_metrics(all_pred_boxes, all_target_boxes)
-            
-            # Update history
-            history['val_loss'].append(val_loss)
-            history['text_map_precision'].append(text_precision)
-            history['text_map_recall'].append(text_recall)
-            history['text_map_f1'].append(text_f1)
-            history['box_precision'].append(box_precision)
-            history['box_recall'].append(box_recall)
-            history['box_f1'].append(box_f1)
-            
-            # Print metrics
-            print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-            print(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}")
-            print(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}")
+        # Record training loss
+        history['train_loss'].append(train_loss)
+        
+        # Skip validation if val_loader is None
+        if val_loader is None:
+            print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f} (Validation disabled)")
             
             # Log metrics
             with open(log_file, 'a') as f:
                 f.write(f"Epoch {epoch+1}/{num_epochs}\n")
-                f.write(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n")
-                f.write(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}\n")
-                f.write(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}\n")
+                f.write(f"Train Loss: {train_loss:.4f} (Validation disabled)\n")
                 f.write("-" * 50 + "\n")
             
-            # Save best model
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            # Update scheduler with training loss if needed
+            if scheduler is not None:
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(train_loss)  # Use training loss instead of validation loss
+                else:
+                    scheduler.step()
+            
+            # Save model periodically
+            if (epoch + 1) % 5 == 0 or epoch == num_epochs - 1:
                 torch.save({
                     'epoch': epoch + 1,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
                     'train_loss': train_loss,
-                    'val_loss': val_loss,
                     'history': history
-                }, os.path.join(save_dir, f"{experiment_name}_best.pth"))
-                print(f"Saved best model with validation loss: {val_loss:.4f}")
-        else:
-            # When skipping validation, still update training history
-            history['train_loss'].append(train_loss)
-            print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f} (Validation skipped)")
+                }, os.path.join(save_dir, f"{experiment_name}_epoch{epoch+1}.pth"))
+                print(f"Saved checkpoint at epoch {epoch+1}")
             
-            # Log training only
-            with open(log_file, 'a') as f:
-                f.write(f"Epoch {epoch+1}/{num_epochs}\n")
-                f.write(f"Train Loss: {train_loss:.4f} (Validation skipped)\n")
-                f.write("-" * 50 + "\n")
-            
+            continue  # Skip validation code
+        
+        # Validation phase (only runs if val_loader is not None)
+        model.eval()
+        val_loss = 0.0
+        val_text_map_loss = 0.0
+        val_box_loss = 0.0
+        val_confidence_loss = 0.0
+        
+        # Metrics for segmentation
+        all_preds = []
+        all_targets = []
+        
+        # Metrics for box detection
+        all_pred_boxes = []
+        all_target_boxes = []
+        
+        with torch.no_grad():
+            progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
+            for batch in progress_bar:
+                # Move data to device
+                images = batch['image'].to(device)
+                text_maps = batch['text_map'].to(device)
+                
+                # Forward pass
+                predictions = model(images)
+                
+                # Calculate loss
+                loss_dict = loss_fn(predictions, {
+                    'text_map': text_maps,
+                    'boxes': batch['boxes']
+                })
+                
+                loss = loss_dict['total_loss']
+                
+                # Update metrics
+                val_loss += loss.item()
+                val_text_map_loss += loss_dict['text_map_loss'].item()
+                val_box_loss += loss_dict['box_loss'].item()
+                val_confidence_loss += loss_dict['confidence_loss'].item()
+                
+                # Collect predictions and targets for metrics
+                pred_maps = (predictions['text_map'] > 0.5).float()
+                all_preds.append(pred_maps.cpu())
+                all_targets.append(text_maps.cpu())
+                
+                # Collect box predictions
+                for i in range(len(images)):
+                    # Get prediction map
+                    pred_conf = predictions['confidence'][i]  # (1, H, W)
+                    pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
+                    
+                    # Extract boxes using non-maximum suppression
+                    detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
+                    all_pred_boxes.append(detected_boxes)
+                    
+                    # Target boxes
+                    target_boxes = batch['boxes'][i]
+                    all_target_boxes.append(target_boxes)
+        
+        # Calculate average validation loss
+        val_loss /= len(val_loader)
+        val_text_map_loss /= len(val_loader)
+        val_box_loss /= len(val_loader)
+        val_confidence_loss /= len(val_loader)
+        
+        # Update scheduler
+        scheduler.step(val_loss)
+        
+        # Calculate text map metrics
+        text_precision, text_recall, text_f1 = calculate_segmentation_metrics(all_preds, all_targets)
+        
+        # Calculate box metrics
+        box_precision, box_recall, box_f1 = calculate_box_metrics(all_pred_boxes, all_target_boxes)
+        
+        # Update history
+        history['val_loss'].append(val_loss)
+        history['text_map_precision'].append(text_precision)
+        history['text_map_recall'].append(text_recall)
+        history['text_map_f1'].append(text_f1)
+        history['box_precision'].append(box_precision)
+        history['box_recall'].append(box_recall)
+        history['box_f1'].append(box_f1)
+        
+        # Print metrics
+        print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}")
+        print(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}")
+        
+        # Log metrics
+        with open(log_file, 'a') as f:
+            f.write(f"Epoch {epoch+1}/{num_epochs}\n")
+            f.write(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n")
+            f.write(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}\n")
+            f.write(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}\n")
+            f.write("-" * 50 + "\n")
+        
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'history': history
+            }, os.path.join(save_dir, f"{experiment_name}_best.pth"))
+            print(f"Saved best model with validation loss: {val_loss:.4f}")
+        
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
             torch.save({
@@ -257,41 +277,22 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'train_loss': train_loss,
-                'val_loss': val_loss if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == num_epochs - 1 else None,
+                'val_loss': val_loss,
                 'history': history
             }, os.path.join(save_dir, f"{experiment_name}_epoch{epoch+1}.pth"))
         
-        # Visualize predictions only occasionally to save memory
-        if (epoch + 1) % 10 == 0 and (epoch + 1) % 5 == 0:  # Only every 10 epochs when validation occurs
-            try:
-                # Create a validation loader with batch size 1 for visualization
-                single_batch_val_loader = DataLoader(
-                    val_loader.dataset,
-                    batch_size=1,
-                    shuffle=False,
-                    num_workers=1,
-                    collate_fn=val_loader.collate_fn
-                )
-                
-                visualize_predictions(
-                    model, 
-                    single_batch_val_loader, 
-                    device, 
-                    os.path.join(save_dir, f"viz_epoch{epoch+1}"), 
-                    num_samples=2  # Reduce number of samples to visualize
-                )
-            except Exception as e:
-                print(f"Warning: Visualization failed with error: {e}")
-                # Continue training even if visualization fails
+        # Visualize some predictions (skipped to save memory)
+        # Removed visualization code to reduce memory usage
     
-    # Plot training history
+    # Plot training history at the end
     try:
         plot_training_history(history, os.path.join(save_dir, f"{experiment_name}_history.png"))
     except Exception as e:
         print(f"Warning: Failed to plot training history: {e}")
     
-    return model, history           
-                
+    print("Training completed!")
+    return model, history
+
 def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
     """
     Extract bounding boxes from the model output using confidence threshold and NMS
