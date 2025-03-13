@@ -9,7 +9,7 @@ model:
 
 training:
   batch_size: 8
-  num_epochs: 50
+  num_epochs: 10
   learning_rate: 0.001
   weight_decay: 0.0001
   scheduler_patience: 5
