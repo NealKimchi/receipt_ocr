@@ -745,7 +745,7 @@ def main():
     print("Starting training...")
     model, history = train_model(
         model=model,
-        train_loader=train_loader,
+        train_loader=None,
         val_loader=val_loader,
         loss_fn=loss_fn,
         optimizer=optimizer,
