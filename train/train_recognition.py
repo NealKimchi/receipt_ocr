@@ -180,12 +180,19 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
         # Encode text if charset_mapper is provided
         if self.charset_mapper:
             encoded_text = self.charset_mapper.encode(text)
+            # Important: pad with zeros if needed to reach max_text_length
+            if len(encoded_text) < self.max_text_length:
+                encoded_text = encoded_text + [0] * (self.max_text_length - len(encoded_text))
+            # Truncate if too long    
+            elif len(encoded_text) > self.max_text_length:
+                encoded_text = encoded_text[:self.max_text_length]
+                
             text_tensor = torch.tensor(encoded_text, dtype=torch.long)
-            text_length = min(len(encoded_text), self.max_text_length)
+            text_length = min(len(text), self.max_text_length)
         else:
             # Just use dummy index for proof of concept
             text_tensor = torch.zeros(self.max_text_length, dtype=torch.long)
-            text_length = len(text)
+            text_length = min(len(text), self.max_text_length)
         
         return {
             'image': image,
@@ -194,6 +201,7 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
             'length': text_length,
             'image_id': sample['image_id']
         }
+
 
 def get_recognition_loaders(config, charset_mapper):
     """Create dataloaders for text recognition"""

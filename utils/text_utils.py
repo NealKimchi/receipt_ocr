@@ -157,7 +157,18 @@ def create_target_tensor(text, charset_mapper, max_length=32):
 
 
 def collate_text_recognition_batch(batch):
-    """Collate function for text recognition batches"""
+    """
+    Collate function for text recognition batches
+    
+    This function ensures proper handling of variable-length text sequences
+    and properly formats the batch for model input.
+    """
+    # Filter out None samples
+    batch = [sample for sample in batch if sample is not None]
+    
+    if not batch:
+        return None
+    
     # Separate data
     images = []
     texts = []
@@ -166,32 +177,15 @@ def collate_text_recognition_batch(batch):
     image_ids = []
     
     for sample in batch:
-        if sample is not None:
-            images.append(sample['image'])
-            texts.append(sample['text'])
-            raw_texts.append(sample['raw_text'])
-            lengths.append(sample['length'])
-            image_ids.append(sample['image_id'])
+        images.append(sample['image'])
+        texts.append(sample['text'])
+        raw_texts.append(sample['raw_text'])
+        lengths.append(sample['length'])
+        image_ids.append(sample['image_id'])
     
-    # Convert to tensors
     images = torch.stack(images, dim=0)
     
-    # Handle text data - this is likely where your error is occurring
-    # Make sure texts are proper tensors before stacking
-    if isinstance(texts[0], torch.Tensor):
-        # If already tensors, pad to max length
-        max_length = max(len(text) for text in texts)
-        padded_texts = []
-        for text in texts:
-            if len(text) < max_length:
-                # Pad with zeros (blank tokens)
-                padding = torch.zeros(max_length - len(text), dtype=text.dtype)
-                text = torch.cat([text, padding])
-            padded_texts.append(text)
-        texts = torch.stack(padded_texts, dim=0)
-    else:
-        # If not tensors, convert lists to tensors
-        texts = torch.tensor(texts, dtype=torch.long)
+    texts = torch.stack(texts, dim=0)
     
     # Convert lengths to tensor
     lengths = torch.tensor(lengths, dtype=torch.long)

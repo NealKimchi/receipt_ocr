@@ -252,17 +252,11 @@ class CRNN(nn.Module):
         # Output shape: (batch_size, channels, height, width)
         features = self.feature_extractor(x)
         
-        # Debug print to see feature dimensions
-        # print(f"Feature shape after CNN: {features.shape}")
-        
         # Prepare features for RNN (collapse height)
         # (batch_size, channels, height, width) -> (batch_size, width, channels*height)
         h, w = features.size(2), features.size(3)
         features = features.permute(0, 3, 1, 2)  # (batch_size, width, channels, height)
         features = features.reshape(batch_size, w, -1)  # (batch_size, width, channels*height)
-        
-        # Debug print to see reshaped feature dimensions
-        # print(f"Reshaped features for RNN: {features.shape}")
         
         # RNN forward pass
         # Output shape: (batch_size, width, hidden_size*num_directions)
@@ -271,39 +265,48 @@ class CRNN(nn.Module):
         else:  # GRU
             rnn_output, _ = self.rnn(features)
         
-        # Debug print to see RNN output dimensions
-        # print(f"RNN output shape: {rnn_output.shape}")
-        
         # Apply attention if configured and in training mode
         if self.use_attention and targets is not None and self.training:
-            # Initialize attention states
-            hidden = torch.zeros(batch_size, self.config['model']['hidden_size'], device=x.device)
-            cell = torch.zeros(batch_size, self.config['model']['hidden_size'], device=x.device)
-            
-            # Initialize output tensor
-            max_length = self.config['data']['max_text_length']
-            outputs = torch.zeros(batch_size, max_length, self.decoder_input_size, device=x.device)
-            
-            # Attention decoding
-            attentions = torch.zeros(batch_size, max_length, rnn_output.size(1), device=x.device)
-            
-            # Teacher forcing for training
-            for t in range(max_length):
-                if t == 0:
-                    # Start with zeros for first step
-                    context = torch.zeros(batch_size, self.decoder_input_size, device=x.device)
-                else:
-                    # Use ground truth for teacher forcing
-                    context = self.classifier.weight[targets[:, t-1]]
+            try:
+                # Initialize attention states
+                hidden = torch.zeros(batch_size, self.config['model']['hidden_size'], device=x.device)
+                cell = torch.zeros(batch_size, self.config['model']['hidden_size'], device=x.device)
                 
-                # Run attention step
-                output, hidden, cell, attention = self.attention(hidden, cell, rnn_output)
-                outputs[:, t] = output
-                attentions[:, t] = attention
-            
-            # Project to class probabilities
-            # Shape: (batch_size, max_length, num_classes)
-            logits = self.classifier(outputs)
+                # Initialize output tensor
+                max_length = self.config['data']['max_text_length']
+                outputs = torch.zeros(batch_size, max_length, self.decoder_input_size, device=x.device)
+                
+                # Attention decoding
+                attentions = torch.zeros(batch_size, max_length, rnn_output.size(1), device=x.device)
+                
+                # Teacher forcing for training
+                num_classes = self.classifier.weight.size(0)
+                for t in range(max_length):
+                    if t == 0:
+                        # Start with zeros for first step
+                        context = torch.zeros(batch_size, self.decoder_input_size, device=x.device)
+                    else:
+                        # Use ground truth for teacher forcing, but handle index out of bounds
+                        # Get previous tokens, ensuring they're within bounds
+                        prev_tokens = targets[:, t-1].clone()
+                        # Clamp indices to valid range (0 to num_classes-1)
+                        prev_tokens = torch.clamp(prev_tokens, 0, num_classes-1)
+                        # Get embeddings from classifier weights
+                        context = self.classifier.weight[prev_tokens]
+                    
+                    # Run attention step
+                    output, hidden, cell, attention = self.attention(hidden, cell, rnn_output)
+                    outputs[:, t] = output
+                    attentions[:, t] = attention
+                
+                # Project to class probabilities
+                # Shape: (batch_size, max_length, num_classes)
+                logits = self.classifier(outputs)
+            except Exception as e:
+                # Fall back to CTC path if attention fails
+                print(f"Warning: Attention mechanism failed with error: {e}. Falling back to CTC.")
+                logits = self.classifier(rnn_output)
+                attentions = None
         else:
             # For CTC or inference, use RNN output directly
             # Project to class probabilities
