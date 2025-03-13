@@ -85,23 +85,44 @@ class AttentionBlock(nn.Module):
         
         self.relu = nn.ReLU(inplace=True)
     
-    def forward(self, g, x):
-        # Adjust spatial dimensions if needed
-        if g.size()[2:] != x.size()[2:]:
-            g = F.interpolate(g, size=x.size()[2:], mode='bilinear', align_corners=True)
-            
-        # Apply convolutions
-        g1 = self.W_g(g)
-        x1 = self.W_x(x)
+    def forward(self, x):
+        # Contracting path
+        x1 = self.inc(x)  # Output: 64 channels
+        x2 = self.down1(x1)  # Output: 128 channels
+        x3 = self.down2(x2)  # Output: 256 channels
+        x4 = self.down3(x3)  # Output: 512 channels
+        x5 = self.down4(x4)  # Output: 1024 channels
         
-        # Element-wise sum and ReLU
-        psi = self.relu(g1 + x1)
+        # IMPORTANT FIX: The parameters order in AttentionBlock.forward is (g, x)
+        # where g is the gating signal (lower resolution feature map) and
+        # x is the feature map being attended to (skip connection)
+        # So it should be self.att1(x5, x4) not self.att1(x4, x5)
+        x4_att = self.att1(x5, x4)  # Correct: gating signal x5, feature map x4
         
-        # Attention map
-        psi = self.psi(psi)
+        # Here x5 has 1024 channels, x4_att has 512 channels
+        x = self.up1(x5, x4_att)  # Output: 512 channels
         
-        # Apply attention 
-        return x * psi  
+        # Fix the same issue in the remaining attention blocks
+        x3_att = self.att2(x, x3)  # Correct: gating signal x, feature map x3
+        x = self.up2(x, x3_att)  # Output: 256 channels
+        
+        x2_att = self.att3(x, x2)  # Correct: gating signal x, feature map x2
+        x = self.up3(x, x2_att)  # Output: 128 channels
+        
+        x1_att = self.att4(x, x1)  # Correct: gating signal x, feature map x1
+        x = self.up4(x, x1_att)  # Output: 64 channels
+        
+        # Output prediction maps
+        text_map = torch.sigmoid(self.outc(x))
+        confidence = torch.sigmoid(self.confidence(x))
+        bbox_coords = torch.sigmoid(self.box_regressor(x))
+        
+        return {
+            'text_map': text_map,
+            'confidence': confidence,
+            'bbox_coords': bbox_coords
+        }
+        
 class TextDetectionModel(nn.Module):
     """U-Net inspired architecture for text detection in receipts"""
     def __init__(self, in_channels=3, out_channels=1):
