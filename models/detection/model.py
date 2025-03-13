@@ -96,36 +96,110 @@ class TextDetectionModel(nn.Module):
             nn.Conv2d(32, 4, kernel_size=1)
         )
     
-    def forward(self, x):
-        # Print input shape for debugging
-        print(f"Input image shape: {x.shape}")
+    def forward(self, predictions, targets):
+        # Text map segmentation loss
+        text_map_loss = self.text_map_loss(predictions['text_map'], targets['text_map'])
         
-        # Contracting path
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
+        # Initialize box and confidence losses
+        box_loss = torch.tensor(0.0, device=text_map_loss.device)
+        confidence_loss = torch.tensor(0.0, device=text_map_loss.device)
         
-        # Expanding path
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
+        batch_size = predictions['text_map'].size(0)
         
-        # Output prediction maps
-        text_map = torch.sigmoid(self.outc(x))
+        # Debug information
+        print(f"targets['boxes'] type: {type(targets['boxes'])}")
+        print(f"targets['boxes'] length: {len(targets['boxes'])}")
         
-        # Confidence scores [0,1]
-        confidence = torch.sigmoid(self.confidence(x))
+        for i in range(min(batch_size, 2)):  # Just check first couple samples
+            if i < len(targets['boxes']):
+                print(f"Sample {i} boxes type: {type(targets['boxes'][i])}")
+                print(f"Sample {i} boxes length: {len(targets['boxes'][i])}")
+                if len(targets['boxes'][i]) > 0:
+                    print(f"Sample {i} first box: {targets['boxes'][i][0]}")
         
-        # Box coordinates [0,1] for x1,y1,x2,y2
-        bbox_coords = torch.sigmoid(self.box_regressor(x))
+        # Process each item in batch
+        valid_samples = 0
+        total_boxes = 0
+        
+        for i in range(batch_size):
+            pred_conf = predictions['confidence'][i]
+            pred_boxes = predictions['bbox_coords'][i]
+            
+            # Skip if no boxes
+            if i >= len(targets['boxes']) or not targets['boxes'][i] or len(targets['boxes'][i]) == 0:
+                print(f"Sample {i}: No valid boxes found")
+                continue
+            
+            # Get image dimensions
+            h, w = pred_conf.shape[1:]
+            
+            # Process target boxes
+            valid_samples += 1
+            sample_boxes = targets['boxes'][i]
+            total_boxes += len(sample_boxes)
+            
+            print(f"Processing {len(sample_boxes)} boxes for sample {i}")
+            
+            for box_idx, box in enumerate(sample_boxes):
+                # Extract box data (expected format: [conf, x1, y1, x2, y2])
+                if len(box) < 5:
+                    print(f"Invalid box format: {box}")
+                    continue
+                    
+                conf, x1, y1, x2, y2 = box
+                
+                # Normalize coordinates to [0,1]
+                x1_norm, y1_norm = x1 / w, y1 / h
+                x2_norm, y2_norm = x2 / w, y2 / h
+                
+                # Sample center point
+                center_y = int((y1 + y2) / 2)
+                center_x = int((x1 + x2) / 2)
+                
+                # Check bounds
+                if center_y < 0 or center_y >= h or center_x < 0 or center_x >= w:
+                    print(f"Center point out of bounds: ({center_x}, {center_y})")
+                    continue
+                    
+                # Get model predictions at center point
+                pred_box = pred_boxes[:, center_y, center_x]
+                pred_conf = pred_conf[0, center_y, center_x]
+                
+                # Target box (normalized)
+                target_box = torch.tensor([x1_norm, y1_norm, x2_norm, y2_norm], device=pred_box.device)
+                target_conf = torch.tensor(conf, device=pred_conf.device)
+                
+                # Calculate individual box loss
+                box_l1_loss = F.smooth_l1_loss(pred_box, target_box)
+                box_loss += box_l1_loss
+                
+                # Calculate confidence loss
+                conf_loss = F.binary_cross_entropy(pred_conf, target_conf)
+                confidence_loss += conf_loss
+                
+                print(f"Box {box_idx}: L1 Loss = {box_l1_loss.item()}, Conf Loss = {conf_loss.item()}")
+        
+        # Average losses
+        if valid_samples > 0:
+            box_loss /= total_boxes
+            confidence_loss /= total_boxes
+        
+        # Print summary
+        print(f"Valid samples: {valid_samples}, Total boxes: {total_boxes}")
+        print(f"Box loss: {box_loss.item()}, Confidence loss: {confidence_loss.item()}")
+        
+        # Combine losses
+        total_loss = (
+            self.text_map_weight * text_map_loss +
+            self.box_weight * box_loss +
+            self.confidence_weight * confidence_loss
+        )
         
         return {
-            'text_map': text_map,          # Text/non-text binary map
-            'confidence': confidence,      # Confidence scores
-            'bbox_coords': bbox_coords     # Bounding box coordinates (normalized)
+            'total_loss': total_loss,
+            'text_map_loss': text_map_loss,
+            'box_loss': box_loss,
+            'confidence_loss': confidence_loss
         }
 
 def get_model(in_channels=3, out_channels=1):

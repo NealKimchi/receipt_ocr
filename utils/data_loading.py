@@ -70,54 +70,73 @@ class ReceiptDataset(Dataset):
         return len(self.dataset)
     
     def __getitem__(self, idx):
-        # Load image
+        # Load sample
         sample = self.dataset[idx]
         
-        # Process image
+        # Load image
         image = self._load_image_from_sample(sample)
+        h, w = image.shape[:2]
         
-        # Extract OCR box annotations
-        boxes = self._process_ocr_boxes(sample, image.shape[:2])
+        # Directly extract and process boxes from raw JSON
+        boxes = []
+        if 'ocr_boxes' in sample:
+            try:
+                ocr_boxes = sample['ocr_boxes']
+                # Convert from string if needed
+                if isinstance(ocr_boxes, str):
+                    import json
+                    ocr_boxes = json.loads(ocr_boxes)
+                    
+                # Process each box
+                for box_data in ocr_boxes:
+                    # Extract polygon points and confidence
+                    polygon = box_data[0]  # [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                    text_conf = box_data[1]  # (text, confidence)
+                    
+                    # Get box coordinates
+                    x_coords = [p[0] for p in polygon]
+                    y_coords = [p[1] for p in polygon]
+                    x1, y1 = min(x_coords), min(y_coords)
+                    x2, y2 = max(x_coords), max(y_coords)
+                    
+                    # Get confidence
+                    conf = text_conf[1] if isinstance(text_conf, (list, tuple)) and len(text_conf) > 1 else 1.0
+                    
+                    # Create box in format [conf, x1, y1, x2, y2]
+                    boxes.append([float(conf), float(x1), float(y1), float(x2), float(y2)])
+            except Exception as e:
+                print(f"Error processing OCR boxes: {e}")
         
         # Create text map
-        h, w = image.shape[:2]
         text_map = np.zeros((h, w), dtype=np.float32)
-        
-        # Fill text map based on boxes
         for box in boxes:
-            conf, x1, y1, x2, y2 = box
+            _, x1, y1, x2, y2 = box
+            # Convert to integers for indexing
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            text_map[y1:y2, x1:x2] = 1.0
+            # Make sure coordinates are within bounds
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            if x1 < x2 and y1 < y2:
+                text_map[y1:y2, x1:x2] = 1.0
         
-        # Apply transformations
+        # Apply transforms
         if self.transform:
-            # Create a list of class labels (1 for each box)
-            labels = [1] * len(boxes)  # Assuming all boxes are text
-            
+            # For albumentations, we need to match our bbox format with what it expects
             transformed = self.transform(
                 image=image,
-                masks=[text_map],
-                bboxes=[[box[1], box[2], box[3], box[4]] for box in boxes],  # Just the coords [x1, y1, x2, y2]
-                labels=labels  # Include the labels parameter
+                mask=text_map
             )
-            
             image = transformed['image']
-            text_map = transformed['masks'][0] if transformed['masks'] else np.zeros(self.image_size, dtype=np.float32)
-            
-            # Get transformed boxes and labels
-            transformed_boxes = transformed['bboxes']
-            transformed_labels = transformed['labels']
-            
-            # Reconstruct boxes with confidence
-            boxes = []
-            for i, box in enumerate(transformed_boxes):
-                x1, y1, x2, y2 = box
-                # Use original confidence if available or default to 1.0
-                conf = boxes[i][0] if i < len(boxes) else 1.0
-                boxes.append([conf, x1, y1, x2, y2])
+            text_map = transformed['mask']
         
-        # Convert to tensor
-        text_map = torch.tensor(text_map, dtype=torch.float32).unsqueeze(0)
+        # Convert to tensors
+        image = torch.as_tensor(image)
+        text_map = torch.as_tensor(text_map, dtype=torch.float32).unsqueeze(0)
+        
+        # Print debug info
+        print(f"Sample {idx}, Number of boxes: {len(boxes)}")
+        if len(boxes) > 0:
+            print(f"First box: {boxes[0]}")
         
         return {
             'image': image,
