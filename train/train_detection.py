@@ -710,13 +710,13 @@ def main():
     """Main training function with hardcoded parameters"""
     # Hardcoded configuration
     hf_dataset = "mychen76/invoices-and-receipts_ocr_v2"
-    save_dir = "detection_model_output_enhanced"  # New directory for enhanced model
-    experiment_name = "text_detection_enhanced"
+    save_dir = "detection_model_output"
+    experiment_name = "text_detection"
     batch_size = 4
     num_epochs = 5
-    learning_rate = 0.005  # Increased learning rate
+    learning_rate = 0.005
     image_size = (512, 512)
-    max_samples = None  # Set to a number for debugging (e.g., 100)
+    max_samples = None
     
     print(f"Using Hugging Face dataset: {hf_dataset}")
     print(f"Saving results to: {save_dir}")
