@@ -271,7 +271,7 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
         split='val', 
         transform=val_transform, 
         image_size=image_size,
-        max_samples=max_samples,
+        max_samples=100,
         cache_dir=cache_dir
     )
     

@@ -649,7 +649,7 @@ def main():
     hf_dataset = "mychen76/invoices-and-receipts_ocr_v2"
     save_dir = "detection_model_output"
     experiment_name = "text_detection"
-    batch_size = 8
+    batch_size = 4
     num_epochs = 50
     learning_rate = 0.001
     image_size = (512, 512)
