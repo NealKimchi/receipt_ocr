@@ -158,7 +158,8 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
                 }, os.path.join(save_dir, f"{experiment_name}_epoch{epoch+1}.pth"))
                 print(f"Saved checkpoint at epoch {epoch+1}")
             
-            continue  # Skip validation code
+            # Skip the rest of the loop (validation)
+            continue
         
         # Validation phase (only runs if val_loader is not None)
         model.eval()
@@ -175,119 +176,119 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
         all_pred_boxes = []
         all_target_boxes = []
         
-    # In the validation phase part of train_model function, add memory-saving steps:
-    with torch.no_grad():
-        progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
-        for batch_idx, batch in enumerate(progress_bar):
-            # Move data to device
-            images = batch['image'].to(device)
-            text_maps = batch['text_map'].to(device)
-            
-            # Forward pass
-            predictions = model(images)
-            
-            # Calculate loss
-            loss_dict = loss_fn(predictions, {
-                'text_map': text_maps,
-                'boxes': batch['boxes']
-            })
-            
-            loss = loss_dict['total_loss']
-            
-            # Update metrics
-            val_loss += loss.item()
-            val_text_map_loss += loss_dict['text_map_loss'].item()
-            val_box_loss += loss_dict['box_loss'].item()
-            val_confidence_loss += loss_dict['confidence_loss'].item()
-            
-            # Collect predictions and targets for metrics
-            pred_maps = (predictions['text_map'] > 0.5).float()
-            all_preds.append(pred_maps.cpu())
-            all_targets.append(text_maps.cpu())
-            
-            # Collect box predictions
-            for i in range(len(images)):
-                # Get prediction map
-                pred_conf = predictions['confidence'][i]  # (1, H, W)
-                pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
+        # Create validation progress bar, ensure it's not None
+        val_progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}") if val_loader is not None else None
+        
+        with torch.no_grad():
+            # Check that we actually have a validation loader and progress bar
+            if val_progress_bar is not None:
+                for batch_idx, batch in enumerate(val_progress_bar):
+                    # Move data to device
+                    images = batch['image'].to(device)
+                    text_maps = batch['text_map'].to(device)
+                    
+                    # Forward pass
+                    predictions = model(images)
+                    
+                    # Calculate loss
+                    loss_dict = loss_fn(predictions, {
+                        'text_map': text_maps,
+                        'boxes': batch['boxes']
+                    })
+                    
+                    loss = loss_dict['total_loss']
+                    
+                    # Update metrics
+                    val_loss += loss.item()
+                    val_text_map_loss += loss_dict['text_map_loss'].item()
+                    val_box_loss += loss_dict['box_loss'].item()
+                    val_confidence_loss += loss_dict['confidence_loss'].item()
+                    
+                    # Collect predictions and targets for metrics
+                    pred_maps = (predictions['text_map'] > 0.5).float()
+                    all_preds.append(pred_maps.cpu())
+                    all_targets.append(text_maps.cpu())
+                    
+                    # Collect box predictions
+                    for i in range(len(images)):
+                        # Get prediction map
+                        pred_conf = predictions['confidence'][i]  # (1, H, W)
+                        pred_boxes = predictions['bbox_coords'][i]  # (4, H, W)
+                        
+                        # Extract boxes using non-maximum suppression
+                        detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
+                        all_pred_boxes.append(detected_boxes)
+                        
+                        # Target boxes
+                        target_boxes = batch['boxes'][i]
+                        all_target_boxes.append(target_boxes)
+                    
+                    # Clear GPU cache periodically
+                    if batch_idx % 5 == 0 and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+        
+                # Calculate average validation loss
+                val_loss /= len(val_loader)
+                val_text_map_loss /= len(val_loader)
+                val_box_loss /= len(val_loader)
+                val_confidence_loss /= len(val_loader)
                 
-                # Extract boxes using non-maximum suppression
-                detected_boxes = extract_boxes(pred_conf.unsqueeze(0), pred_boxes, threshold=0.5)
-                all_pred_boxes.append(detected_boxes)
+                # Update scheduler
+                scheduler.step(val_loss)
                 
-                # Target boxes
-                target_boxes = batch['boxes'][i]
-                all_target_boxes.append(target_boxes)
-            
-            # Clear GPU cache periodically
-            if batch_idx % 5 == 0 and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-        # Calculate average validation loss
-        val_loss /= len(val_loader)
-        val_text_map_loss /= len(val_loader)
-        val_box_loss /= len(val_loader)
-        val_confidence_loss /= len(val_loader)
-        
-        # Update scheduler
-        scheduler.step(val_loss)
-        
-        # Calculate text map metrics
-        text_precision, text_recall, text_f1 = calculate_segmentation_metrics(all_preds, all_targets)
-        
-        # Calculate box metrics
-        box_precision, box_recall, box_f1 = calculate_box_metrics(all_pred_boxes, all_target_boxes)
-        
-        # Update history
-        history['val_loss'].append(val_loss)
-        history['text_map_precision'].append(text_precision)
-        history['text_map_recall'].append(text_recall)
-        history['text_map_f1'].append(text_f1)
-        history['box_precision'].append(box_precision)
-        history['box_recall'].append(box_recall)
-        history['box_f1'].append(box_f1)
-        
-        # Print metrics
-        print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        print(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}")
-        print(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}")
-        
-        # Log metrics
-        with open(log_file, 'a') as f:
-            f.write(f"Epoch {epoch+1}/{num_epochs}\n")
-            f.write(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n")
-            f.write(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}\n")
-            f.write(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}\n")
-            f.write("-" * 50 + "\n")
-        
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'history': history
-            }, os.path.join(save_dir, f"{experiment_name}_best.pth"))
-            print(f"Saved best model with validation loss: {val_loss:.4f}")
-        
-        # Save checkpoint every 5 epochs
-        if (epoch + 1) % 5 == 0:
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'history': history
-            }, os.path.join(save_dir, f"{experiment_name}_epoch{epoch+1}.pth"))
-        
-        # Visualize some predictions (skipped to save memory)
-        # Removed visualization code to reduce memory usage
+                # Calculate text map metrics
+                text_precision, text_recall, text_f1 = calculate_segmentation_metrics(all_preds, all_targets)
+                
+                # Calculate box metrics
+                box_precision, box_recall, box_f1 = calculate_box_metrics(all_pred_boxes, all_target_boxes)
+                
+                # Update history
+                history['val_loss'].append(val_loss)
+                history['text_map_precision'].append(text_precision)
+                history['text_map_recall'].append(text_recall)
+                history['text_map_f1'].append(text_f1)
+                history['box_precision'].append(box_precision)
+                history['box_recall'].append(box_recall)
+                history['box_f1'].append(box_f1)
+                
+                # Print metrics
+                print(f"Epoch {epoch+1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+                print(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}")
+                print(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}")
+                
+                # Log metrics
+                with open(log_file, 'a') as f:
+                    f.write(f"Epoch {epoch+1}/{num_epochs}\n")
+                    f.write(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n")
+                    f.write(f"Text Map - Precision: {text_precision:.4f}, Recall: {text_recall:.4f}, F1: {text_f1:.4f}\n")
+                    f.write(f"Boxes - Precision: {box_precision:.4f}, Recall: {box_recall:.4f}, F1: {box_f1:.4f}\n")
+                    f.write("-" * 50 + "\n")
+                
+                # Save best model
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    torch.save({
+                        'epoch': epoch + 1,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'scheduler_state_dict': scheduler.state_dict(),
+                        'train_loss': train_loss,
+                        'val_loss': val_loss,
+                        'history': history
+                    }, os.path.join(save_dir, f"{experiment_name}_best.pth"))
+                    print(f"Saved best model with validation loss: {val_loss:.4f}")
+                
+                # Save checkpoint every 5 epochs
+                if (epoch + 1) % 5 == 0:
+                    torch.save({
+                        'epoch': epoch + 1,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'scheduler_state_dict': scheduler.state_dict(),
+                        'train_loss': train_loss,
+                        'val_loss': val_loss,
+                        'history': history
+                    }, os.path.join(save_dir, f"{experiment_name}_epoch{epoch+1}.pth"))
     
     # Plot training history at the end
     try:
