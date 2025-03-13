@@ -58,11 +58,12 @@ class ReceiptDataset(Dataset):
         
         # Set default transform if none provided
         if transform is None:
+            # Simpler transforms without bbox_params
             self.transform = A.Compose([
                 A.Resize(height=image_size[0], width=image_size[1]),
                 A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ToTensorV2(),
-            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+            ])  # Remove bbox_params completely
         else:
             self.transform = transform
     
@@ -119,19 +120,51 @@ class ReceiptDataset(Dataset):
             if x1 < x2 and y1 < y2:
                 text_map[y1:y2, x1:x2] = 1.0
         
-        # Apply transforms
         if self.transform:
-            # For albumentations, we need to match our bbox format with what it expects
-            transformed = self.transform(
-                image=image,
-                mask=text_map
-            )
+            transformed = self.transform(image=image)
             image = transformed['image']
-            text_map = transformed['mask']
-        
-        # Convert to tensors
-        image = torch.as_tensor(image)
-        text_map = torch.as_tensor(text_map, dtype=torch.float32).unsqueeze(0)
+
+            # Create text map at target size
+            resized_text_map = np.zeros(self.image_size, dtype=np.float32)
+            
+            # We'll handle the boxes manually
+            normalized_boxes = []
+            for box in boxes:
+                # Format: [conf, x1, y1, x2, y2]
+                conf, x1, y1, x2, y2 = box
+                
+                # Normalize coordinates to [0,1]
+                orig_h, orig_w = image_shape[:2]
+                x1_norm = x1 / orig_w
+                y1_norm = y1 / orig_h
+                x2_norm = x2 / orig_w 
+                y2_norm = y2 / orig_h
+                
+                # Scale to new dimensions
+                h, w = self.image_size
+                x1_new = int(x1_norm * w)
+                y1_new = int(y1_norm * h)
+                x2_new = int(x2_norm * w)
+                y2_new = int(y2_norm * h)
+                
+                # Ensure valid coordinates
+                x1_new = max(0, min(x1_new, w-1))
+                y1_new = max(0, min(y1_new, h-1))
+                x2_new = max(x1_new+1, min(x2_new, w))
+                y2_new = max(y1_new+1, min(y2_new, h))
+                
+                # Fill text map
+                resized_text_map[y1_new:y2_new, x1_new:x2_new] = 1.0
+                
+                # Keep normalized coordinates for loss function
+                normalized_boxes.append([conf, x1_norm, y1_norm, x2_norm, y2_norm])
+            
+            # Replace the original text map and boxes
+            text_map = resized_text_map
+            boxes = normalized_boxes
+
+        # Convert text map to tensor
+        text_map = torch.tensor(text_map, dtype=torch.float32).unsqueeze(0)
         
         # Print debug info
         print(f"Sample {idx}, Number of boxes: {len(boxes)}")
