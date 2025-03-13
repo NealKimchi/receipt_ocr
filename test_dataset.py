@@ -3,34 +3,52 @@ import torch
 from datasets import load_dataset
 import json
 
-# Modified test script
-def test_dataset():
+def inspect_dataset():
     # Load the dataset
     dataset = load_dataset("mychen76/invoices-and-receipts_ocr_v2", split='train')
     
-    # Look at the first sample in more detail
+    # Examine the first sample
     sample = dataset[0]
     
-    # Check if raw_data contains OCR information
-    if 'raw_data' in sample:
-        print("\nSample raw_data keys:")
-        if isinstance(sample['raw_data'], dict):
-            print(list(sample['raw_data'].keys()))
-            
-            # Check if ocr_boxes is in raw_data
-            if 'ocr_boxes' in sample['raw_data']:
-                print("\nFound ocr_boxes in raw_data!")
-                print(f"Type: {type(sample['raw_data']['ocr_boxes'])}")
-                print(f"Preview: {str(sample['raw_data']['ocr_boxes'])[:100]}...")
+    # Print all available keys at the top level
+    print(f"Top-level keys: {list(sample.keys())}")
     
-    # Check if parsed_data contains OCR information
-    if 'parsed_data' in sample:
-        print("\nSample parsed_data keys:")
-        if isinstance(sample['parsed_data'], dict):
-            print(list(sample['parsed_data'].keys()))
+    # Examine raw_data
+    if 'raw_data' in sample:
+        raw_data = sample['raw_data']
+        print(f"\nRaw data type: {type(raw_data)}")
+        
+        if isinstance(raw_data, str):
+            print(f"Raw data preview (string): {raw_data[:200]}...")
+            try:
+                parsed_raw = json.loads(raw_data)
+                print(f"Raw data parsed as JSON: {type(parsed_raw)}")
+                if isinstance(parsed_raw, dict):
+                    print(f"Raw data JSON keys: {list(parsed_raw.keys())}")
+            except:
+                print("Failed to parse raw_data as JSON")
+        elif isinstance(raw_data, dict):
+            print(f"Raw data keys: {list(raw_data.keys())}")
             
-            # Check if any field might contain box information
-            for key in sample['parsed_data'].keys():
+            # Check first few values
+            for key in list(raw_data.keys())[:3]:
                 print(f"\nKey: {key}")
-                print(f"Type: {type(sample['parsed_data'][key])}")
-                print(f"Preview: {str(sample['parsed_data'][key])[:100]}...")
+                print(f"Value type: {type(raw_data[key])}")
+                print(f"Value preview: {str(raw_data[key])[:100]}...")
+    
+    # Examine parsed_data
+    if 'parsed_data' in sample:
+        parsed_data = sample['parsed_data']
+        print(f"\nParsed data type: {type(parsed_data)}")
+        
+        if isinstance(parsed_data, dict):
+            print(f"Parsed data keys: {list(parsed_data.keys())}")
+            
+            # Check first few values
+            for key in list(parsed_data.keys())[:3]:
+                print(f"\nKey: {key}")
+                print(f"Value type: {type(parsed_data[key])}")
+                print(f"Value preview: {str(parsed_data[key])[:100]}...")
+
+if __name__ == "__main__":
+    inspect_dataset()
