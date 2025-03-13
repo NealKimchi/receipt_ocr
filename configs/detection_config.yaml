@@ -1,0 +1,42 @@
+# Configuration for text detection model
+
+model:
+  name: 'TextDetectionModel'
+  in_channels: 3
+  out_channels: 1
+  init_filters: 64
+  dropout_rate: 0.2
+
+training:
+  batch_size: 8
+  num_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler_patience: 5
+  scheduler_factor: 0.5
+  early_stopping_patience: 10
+  save_interval: 5
+  eval_interval: 1
+  num_workers: 4
+
+data:
+  image_size: [512, 512]
+  data_dir: 'data/'
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  augmentation:
+    rotation_range: 10
+    brightness_contrast_range: 0.2
+    scale_range: [0.8, 1.0]
+
+loss:
+  text_map_weight: 1.0
+  box_weight: 1.0
+  confidence_weight: 0.5
+  dice_bce_ratio: 0.5
+
+inference:
+  confidence_threshold: 0.5
+  nms_threshold: 0.3
+  max_boxes: 100
