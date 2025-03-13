@@ -30,7 +30,6 @@ class DownBlock(nn.Module):
         x = self.conv2(x)
         return x
 
-# Fix for the UpBlock class
 class UpBlock(nn.Module):
     """Upsampling block with transposed convolution and double convolution"""
     def __init__(self, in_channels, out_channels):
@@ -38,16 +37,16 @@ class UpBlock(nn.Module):
         # Transpose convolution reduces channels by half
         self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
         
-        # After concatenation, we have (in_channels // 2 + out_channels) channels
+        # After concatenation with skip connection, we'll have (in_channels // 2 + out_channels) channels
         self.conv1 = ConvBlock(in_channels // 2 + out_channels, out_channels)
         self.conv2 = ConvBlock(out_channels, out_channels)
     
     def forward(self, x1, x2):
         # x1 is from the deeper layer (e.g., from down path)
         # x2 is the skip connection from the encoder
-        x1 = self.up(x1)
+        x1 = self.up(x1)  # This halves the number of channels in x1
         
-        # Adjust dimensions if needed
+        # Adjust dimensions if needed (for height and width)
         diff_y = x2.size()[2] - x1.size()[2]
         diff_x = x2.size()[3] - x1.size()[3]
         
@@ -55,7 +54,6 @@ class UpBlock(nn.Module):
                         diff_y // 2, diff_y - diff_y // 2])
         
         # Concatenate along channel dimension
-        # Important: The order matters here. The skip connection (x2) should come first
         x = torch.cat([x2, x1], dim=1)
         x = self.conv1(x)
         x = self.conv2(x)
@@ -110,7 +108,7 @@ class AttentionBlock(nn.Module):
         # Attention map
         psi = self.psi(psi)
         
-        # Apply attention
+        # Apply attention - this does not change the number of channels in x
         return x * psi
         
 class TextDetectionModel(nn.Module):
@@ -136,11 +134,12 @@ class TextDetectionModel(nn.Module):
         self.up3 = UpBlock(256, 128)
         self.up4 = UpBlock(128, 64)
         
-        # Attention gates for better feature refinement
-        self.att1 = AttentionBlock(512, 512)
-        self.att2 = AttentionBlock(256, 256)
-        self.att3 = AttentionBlock(128, 128)
-        self.att4 = AttentionBlock(64, 64)
+        # Attention gates - each attention gate has parameters for gating signal channels and skip connection channels
+        # The gating signal comes from the decoder path, and the skip connection from the encoder
+        self.att1 = AttentionBlock(f_g=1024, f_l=512)  # f_g: gating signal channels, f_l: skip connection channels
+        self.att2 = AttentionBlock(f_g=512, f_l=256)
+        self.att3 = AttentionBlock(f_g=256, f_l=128)
+        self.att4 = AttentionBlock(f_g=128, f_l=64)
         
         # Output layers
         self.outc = nn.Conv2d(64, out_channels, kernel_size=1)
@@ -158,29 +157,29 @@ class TextDetectionModel(nn.Module):
             nn.Conv2d(32, 4, kernel_size=1)
         )
     
-    # Modified TextDetectionModel forward method to ensure correct dimensions
     def forward(self, x):
-        # Contracting path remains the same
-        x1 = self.inc(x)  # Output: 64 channels
-        x2 = self.down1(x1)  # Output: 128 channels
-        x3 = self.down2(x2)  # Output: 256 channels
-        x4 = self.down3(x3)  # Output: 512 channels
-        x5 = self.down4(x4)  # Output: 1024 channels
+        # Contracting path
+        x1 = self.inc(x)           # Output: 64 channels
+        x2 = self.down1(x1)        # Output: 128 channels
+        x3 = self.down2(x2)        # Output: 256 channels
+        x4 = self.down3(x3)        # Output: 512 channels
+        x5 = self.down4(x4)        # Output: 1024 channels
         
-        # Apply attention before upsampling
-        x4_att = self.att1(x5, x4)  # Output: x4 with attention applied (still 512 channels)
+        # Apply attention mechanism to skip connections
+        # Important: Attention is applied to skip connections BEFORE they're used in the upsampling path
+        x4_att = self.att1(x5, x4)  # Gating signal: x5 (1024), Skip connection: x4 (512) -> Output: x4_att (512 channels)
         
-        # Upsampling path with correct attention handling
-        x = self.up1(x5, x4_att)  # Output: 512 channels
+        # Up path with attended features
+        x = self.up1(x5, x4_att)   # Input: x5 (1024), x4_att (512) -> Output: 512 channels
         
-        x3_att = self.att2(x, x3)  # Apply attention to x3 (256 channels)
-        x = self.up2(x, x3_att)  # Output: 256 channels
+        x3_att = self.att2(x, x3)  # Gating signal: x (512), Skip connection: x3 (256) -> Output: x3_att (256 channels)
+        x = self.up2(x, x3_att)    # Input: x (512), x3_att (256) -> Output: 256 channels
         
-        x2_att = self.att3(x, x2)  # Apply attention to x2 (128 channels)
-        x = self.up3(x, x2_att)  # Output: 128 channels
+        x2_att = self.att3(x, x2)  # Gating signal: x (256), Skip connection: x2 (128) -> Output: x2_att (128 channels)
+        x = self.up3(x, x2_att)    # Input: x (256), x2_att (128) -> Output: 128 channels
         
-        x1_att = self.att4(x, x1)  # Apply attention to x1 (64 channels)
-        x = self.up4(x, x1_att)  # Output: 64 channels
+        x1_att = self.att4(x, x1)  # Gating signal: x (128), Skip connection: x1 (64) -> Output: x1_att (64 channels)
+        x = self.up4(x, x1_att)    # Input: x (128), x1_att (64) -> Output: 64 channels
         
         # Output prediction maps
         text_map = torch.sigmoid(self.outc(x))
