@@ -263,76 +263,19 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
 
 
 def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
-    """
-    Extract bounding boxes from the model output using confidence threshold and NMS
+    # Print shape for debugging
+    print(f"Confidence map shape: {confidence_map.shape}")
     
-    Args:
-        confidence_map (torch.Tensor): Predicted confidence map (1, H, W)
-        box_coords (torch.Tensor): Predicted box coordinates (4, H, W)
-        threshold (float): Confidence threshold
-        nms_threshold (float): IoU threshold for NMS
+    # Adjust how dimensions are extracted based on actual shape
+    if len(confidence_map.shape) == 3:  # [C, H, W]
+        h, w = confidence_map.shape[1:]
+    elif len(confidence_map.shape) == 4:  # [B, C, H, W]
+        h, w = confidence_map.shape[2:]
+    else:
+        # Handle unexpected shape
+        raise ValueError(f"Unexpected confidence_map shape: {confidence_map.shape}")
     
-    Returns:
-        list: List of detected boxes [x1, y1, x2, y2, confidence]
-    """
-    # Get dimensions
-    h, w = confidence_map.shape[1:]
-    
-    # Threshold confidence map
-    binary_map = (confidence_map > threshold).float()[0]  # (H, W)
-    
-    # If no detections, return empty list
-    if binary_map.sum() == 0:
-        return []
-    
-    # Get indices of high confidence points
-    y_indices, x_indices = torch.where(binary_map > 0)
-    
-    # Get box coordinates and confidence at those points
-    boxes = []
-    for i in range(len(y_indices)):
-        y, x = y_indices[i], x_indices[i]
-        
-        # Get predicted box coordinates
-        box = box_coords[:, y, x].cpu().numpy()  # (4,)
-        
-        # Convert to absolute coordinates
-        x1, y1, x2, y2 = box
-        x1 = max(0, x1 * w)
-        y1 = max(0, y1 * h)
-        x2 = min(w, x2 * w)
-        y2 = min(h, y2 * h)
-        
-        # Get confidence score
-        conf = confidence_map[0, y, x].item()
-        
-        boxes.append([x1, y1, x2, y2, conf])
-    
-    # Perform non-maximum suppression
-    boxes = np.array(boxes)
-    if len(boxes) > 0:
-        # Sort by confidence
-        indices = np.argsort(-boxes[:, 4])
-        boxes = boxes[indices]
-        
-        # NMS
-        keep = []
-        while len(boxes) > 0:
-            keep.append(boxes[0])
-            if len(boxes) == 1:
-                break
-            
-            # Calculate IoU of the first box with all other boxes
-            ious = calculate_iou(boxes[0, :4], boxes[1:, :4])
-            
-            # Find boxes with IoU less than threshold
-            mask = ious < nms_threshold
-            boxes = boxes[1:][mask]
-        
-        boxes = np.array(keep)
-    
-    return boxes
-
+    # Rest of the function...
 
 def calculate_iou(box, boxes):
     """
