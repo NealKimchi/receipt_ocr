@@ -68,18 +68,42 @@ class ReceiptDataset(Dataset):
                     # Process each box
                     for box_data in ocr_boxes:
                         try:
-                            # Format: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], (text, confidence)
+                            # Defensive coding to handle different formats
+                            if not isinstance(box_data, list) or len(box_data) < 2:
+                                continue
+                                
                             polygon = box_data[0]
                             text_conf = box_data[1]
                             
-                            # Extract coordinates
-                            x_vals = [p[0] for p in polygon]
-                            y_vals = [p[1] for p in polygon]
-                            x1, y1 = min(x_vals), min(y_vals)
-                            x2, y2 = max(x_vals), max(y_vals)
+                            # Verify polygon has valid structure
+                            if not isinstance(polygon, list) or len(polygon) < 4:
+                                continue
+                                
+                            # Extract x,y coordinates safely
+                            try:
+                                x_vals = []
+                                y_vals = []
+                                for point in polygon:
+                                    if isinstance(point, list) and len(point) >= 2:
+                                        x_vals.append(float(point[0]))
+                                        y_vals.append(float(point[1]))
+                                
+                                if len(x_vals) < 2 or len(y_vals) < 2:
+                                    continue
+                                    
+                                x1, y1 = min(x_vals), min(y_vals)
+                                x2, y2 = max(x_vals), max(y_vals)
+                            except (IndexError, ValueError, TypeError):
+                                continue
                             
-                            # Extract confidence
-                            conf = float(text_conf[1]) if isinstance(text_conf, (list, tuple)) and len(text_conf) > 1 else 1.0
+                            # Extract confidence safely
+                            try:
+                                if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
+                                    conf = float(text_conf[1])
+                                else:
+                                    conf = 1.0
+                            except (IndexError, ValueError, TypeError):
+                                conf = 1.0
                             
                             # Create normalized box [conf, x1, y1, x2, y2]
                             norm_x1 = float(x1) / original_w
@@ -90,7 +114,8 @@ class ReceiptDataset(Dataset):
                             # Add to boxes list
                             boxes.append([conf, norm_x1, norm_y1, norm_x2, norm_y2])
                         except Exception as e:
-                            print(f"Error processing box: {e}")
+                            # Silently ignore problematic boxes
+                            pass
             except Exception as e:
                 print(f"Error parsing raw_data: {e}")
         
@@ -118,7 +143,8 @@ class ReceiptDataset(Dataset):
         text_map = text_map.unsqueeze(0)
         
         # Print debug info
-        print(f"Sample {idx}: Found {len(boxes)} boxes")
+        if idx % 100 == 0:  # Only print occasionally to reduce output
+            print(f"Sample {idx}: Found {len(boxes)} boxes")
         
         return {
             'image': image,
