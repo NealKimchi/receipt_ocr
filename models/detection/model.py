@@ -92,32 +92,18 @@ class TextDetectionModel(nn.Module):
         self.box_regressor = nn.Conv2d(64, 4, kernel_size=1)
     
     def forward(self, x):
-        print(f"**DEBUG**  Input to model: {x.shape}")
         # Contracting path
         x1 = self.inc(x)
-        print(f"**DEBUG**  After inc: {x1.shape}")
         x2 = self.down1(x1)
-        print(f"**DEBUG**  After down1: {x2.shape}")
         x3 = self.down2(x2)
-        print(f"**DEBUG**  After down2: {x3.shape}")
         x4 = self.down3(x3)
-        print(f"**DEBUG**  After down3: {x4.shape}")
         x5 = self.down4(x4)
-        print(f"**DEBUG**  After down4: {x5.shape}")
         
         # Expanding path
-        print(f"**DEBUG**  Before up1 - x5: {x5.shape}, x4: {x4.shape}")
         x = self.up1(x5, x4)
-        print(f"**DEBUG**  After up1: {x.shape}")
-        print(f"**DEBUG**  Before up2 - x: {x.shape}, x3: {x3.shape}")
         x = self.up2(x, x3)
-        print(f"**DEBUG**  After up2: {x.shape}")
-        print(f"**DEBUG**  Before up3 - x: {x.shape}, x2: {x2.shape}")
         x = self.up3(x, x2)
-        print(f"**DEBUG**  After up3: {x.shape}")
-        print(f"**DEBUG**  Before up4 - x: {x.shape}, x1: {x1.shape}")
         x = self.up4(x, x1)
-        print(f"**DEBUG**  After up4: {x.shape}")
         
         # Output prediction maps
         text_map = torch.sigmoid(self.outc(x))
