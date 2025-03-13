@@ -359,6 +359,14 @@ def calculate_box_metrics(pred_boxes, target_boxes, iou_threshold=0.5):
         preds = pred_boxes[i]
         targets = target_boxes[i]
         
+        # Handle None values in predicted boxes
+        if preds is None:
+            preds = []
+        
+        # Handle None values in target boxes
+        if targets is None:
+            targets = []
+        
         if len(targets) == 0:
             # If no targets, all predictions are false positives
             total_false_positives += len(preds)
@@ -419,7 +427,6 @@ def calculate_box_metrics(pred_boxes, target_boxes, iou_threshold=0.5):
     f1 = 2 * precision * recall / (precision + recall + 1e-6)
     
     return precision, recall, f1
-
 
 def calculate_single_iou(box1, box2):
     """Calculate IoU between two boxes"""
