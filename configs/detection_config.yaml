@@ -36,10 +36,10 @@ loss:
 training:
   batch_size: 8  # Batch size for training
   num_epochs: 20  # Total number of epochs (increased from 10)
-  learning_rate: 1e-4  # Initial learning rate (reduced from 0.001)
+  learning_rate: 0.0001  # Initial learning rate as a numeric value (1e-4)
   weight_decay: 0.0001  # L2 regularization
   num_workers: 4  # Number of workers for data loading
-  optimizer: "adam"  # Added this key: "adam" or "sgd"
+  optimizer: "adam"  # "adam" or "sgd"
   
   # Logging and visualization
   log_interval: 10  # Print loss every N batches
@@ -54,7 +54,7 @@ training:
   scheduler_factor: 0.5  # Factor for ReduceLROnPlateau
   warmup_epochs: 3  # Number of epochs for warmup (for cosine_warmup)
   warmup_mult: 2  # Multiplier for warmup cycles (for cosine_warmup)
-  min_lr: 1e-6  # Minimum learning rate for scheduler
+  min_lr: 0.000001  # Minimum learning rate for scheduler (1e-6)
   
   # Early stopping
   early_stopping_patience: 10  # Number of epochs to wait for improvement
