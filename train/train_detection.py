@@ -263,19 +263,79 @@ def train_model(model, train_loader, val_loader, loss_fn, optimizer, scheduler,
 
 
 def extract_boxes(confidence_map, box_coords, threshold=0.5, nms_threshold=0.3):
+    """
+    Extract bounding boxes from the model output using confidence threshold and NMS
+    """
+    
     # Print shape for debugging
     print(f"Confidence map shape: {confidence_map.shape}")
     
-    # Adjust how dimensions are extracted based on actual shape
+    # Get dimensions
     if len(confidence_map.shape) == 3:  # [C, H, W]
         h, w = confidence_map.shape[1:]
     elif len(confidence_map.shape) == 4:  # [B, C, H, W]
         h, w = confidence_map.shape[2:]
     else:
         # Handle unexpected shape
-        raise ValueError(f"Unexpected confidence_map shape: {confidence_map.shape}")
+        print(f"Warning: Unexpected confidence_map shape: {confidence_map.shape}")
+        return []  # Return empty list instead of None
     
-    # Rest of the function...
+    # Threshold confidence map
+    binary_map = (confidence_map > threshold).float()
+    if len(binary_map.shape) > 2:
+        binary_map = binary_map[0]  # Take first channel/batch
+    
+    # If no detections, return empty list
+    if binary_map.sum() == 0:
+        return []  # Return empty list instead of None
+    
+    # Get indices of high confidence points
+    y_indices, x_indices = torch.where(binary_map > 0)
+    
+    # Get box coordinates and confidence at those points
+    boxes = []
+    for i in range(len(y_indices)):
+        y, x = y_indices[i], x_indices[i]
+        
+        # Get predicted box coordinates
+        box = box_coords[:, y, x].cpu().numpy()  # (4,)
+        
+        # Convert to absolute coordinates
+        x1, y1, x2, y2 = box
+        x1 = max(0, x1 * w)
+        y1 = max(0, y1 * h)
+        x2 = min(w, x2 * w)
+        y2 = min(h, y2 * h)
+        
+        # Get confidence score
+        conf = confidence_map[0, y, x].item()
+        
+        boxes.append([x1, y1, x2, y2, conf])
+    
+    # Perform non-maximum suppression
+    boxes = np.array(boxes)
+    if len(boxes) > 0:
+        # Sort by confidence
+        indices = np.argsort(-boxes[:, 4])
+        boxes = boxes[indices]
+        
+        # NMS
+        keep = []
+        while len(boxes) > 0:
+            keep.append(boxes[0])
+            if len(boxes) == 1:
+                break
+            
+            # Calculate IoU of the first box with all other boxes
+            ious = calculate_iou(boxes[0, :4], boxes[1:, :4])
+            
+            # Find boxes with IoU less than threshold
+            mask = ious < nms_threshold
+            boxes = boxes[1:][mask]
+        
+        boxes = np.array(keep)
+    
+    return boxes
 
 def calculate_iou(box, boxes):
     """
@@ -305,7 +365,6 @@ def calculate_iou(box, boxes):
     iou = intersection / (box_area + boxes_area - intersection + 1e-6)
     
     return iou
-
 
 def calculate_segmentation_metrics(predictions, targets):
     """
@@ -337,7 +396,6 @@ def calculate_segmentation_metrics(predictions, targets):
     f1 = 2 * precision * recall / (precision + recall + 1e-6)
     
     return precision, recall, f1
-
 
 def calculate_box_metrics(pred_boxes, target_boxes, iou_threshold=0.5):
     """
@@ -455,11 +513,9 @@ def calculate_single_iou(box1, box2):
     
     return iou
 
-
 def visualize_predictions(model, data_loader, device, save_dir, num_samples=5):
     """Visualize model predictions on some samples"""
     os.makedirs(save_dir, exist_ok=True)
-    
     model.eval()
     with torch.no_grad():
         for i, batch in enumerate(data_loader):
@@ -496,6 +552,10 @@ def visualize_predictions(model, data_loader, device, save_dir, num_samples=5):
                     predictions['bbox_coords'][j],
                     threshold=0.5
                 )
+                
+                # Handle case where no boxes are detected
+                if detected_boxes is None:
+                    detected_boxes = []
                 
                 # Create visualization
                 # 1. Original image with detected boxes
@@ -550,7 +610,6 @@ def visualize_predictions(model, data_loader, device, save_dir, num_samples=5):
                 plt.tight_layout()
                 plt.savefig(os.path.join(save_dir, f"sample_{i}_{j}_conf_map.png"))
                 plt.close()
-
 
 def plot_training_history(history, save_path):
     """Plot training history"""
