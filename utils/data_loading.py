@@ -91,18 +91,30 @@ class ReceiptDataset(Dataset):
         
         # Apply transformations
         if self.transform:
+            # Create a list of class labels (1 for each box)
+            labels = [1] * len(boxes)  # Assuming all boxes are text
+            
             transformed = self.transform(
                 image=image,
                 masks=[text_map],
-                bboxes=[[box[1], box[2], box[3], box[4], box[0]] for box in boxes]  # Format: [x1, y1, x2, y2, class_id(conf)]
+                bboxes=[[box[1], box[2], box[3], box[4]] for box in boxes],  # Just the coords [x1, y1, x2, y2]
+                labels=labels  # Include the labels parameter
             )
             
             image = transformed['image']
             text_map = transformed['masks'][0] if transformed['masks'] else np.zeros(self.image_size, dtype=np.float32)
-            transformed_boxes = transformed['bboxes']
             
-            # Convert boxes back to [conf, x1, y1, x2, y2] format
-            boxes = [[box[4], box[0], box[1], box[2], box[3]] for box in transformed_boxes]
+            # Get transformed boxes and labels
+            transformed_boxes = transformed['bboxes']
+            transformed_labels = transformed['labels']
+            
+            # Reconstruct boxes with confidence
+            boxes = []
+            for i, box in enumerate(transformed_boxes):
+                x1, y1, x2, y2 = box
+                # Use original confidence if available or default to 1.0
+                conf = boxes[i][0] if i < len(boxes) else 1.0
+                boxes.append([conf, x1, y1, x2, y2])
         
         # Convert to tensor
         text_map = torch.tensor(text_map, dtype=torch.float32).unsqueeze(0)
