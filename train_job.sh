@@ -2,12 +2,10 @@
 #SBATCH --job-name=receipt_ocr
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --output=train_output_%j.log
-#SBATCH --partition=gpu      # Using the GPU partition
-#SBATCH --gres=gpu:1         # Request 1 GPU
+#SBATCH --mem=64G          # Request more memory (increase from 32G to 64G)
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
 
 # Load necessary modules
 module purge
