@@ -707,7 +707,7 @@ def main():
     save_dir = "detection_model_output"
     experiment_name = "text_detection"
     batch_size = 4
-    num_epochs = 50
+    num_epochs = 5
     learning_rate = 0.001
     image_size = (512, 512)
     max_samples = None  # Set to a number for debugging (e.g., 100)
