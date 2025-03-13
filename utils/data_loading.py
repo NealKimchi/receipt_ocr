@@ -49,6 +49,17 @@ class ReceiptDataset(Dataset):
         # Get sample from dataset
         sample = self.dataset[idx]
         
+        print(f"Sample {idx} keys: {list(sample.keys())}")
+        if 'ocr_boxes' in sample:
+            print(f"ocr_boxes type: {type(sample['ocr_boxes'])}")
+            if isinstance(sample['ocr_boxes'], str):
+                print(f"ocr_boxes length: {len(sample['ocr_boxes'])}")
+                print(f"ocr_boxes preview: {sample['ocr_boxes'][:100]}")  # Show first 100 chars
+            elif isinstance(sample['ocr_boxes'], list):
+                print(f"ocr_boxes length: {len(sample['ocr_boxes'])}")
+                if len(sample['ocr_boxes']) > 0:
+                    print(f"First box: {sample['ocr_boxes'][0]}")
+        
         # Load image 
         image = self._load_image(sample)
         original_h, original_w = image.shape[:2]
