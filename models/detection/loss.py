@@ -5,26 +5,18 @@ import torch.nn.functional as F
 
 class TextDetectionLoss(nn.Module):
     """Combined loss function for text detection task"""
-    def __init__(self, text_map_weight=1.0, box_weight=1.0, confidence_weight=0.5):
+    def __init__(self, text_map_weight=1.0, box_weight=5.0, confidence_weight=0.5):
         super(TextDetectionLoss, self).__init__()
         self.text_map_weight = text_map_weight
-        self.box_weight = box_weight
+        self.box_weight = box_weight  # Increased from 1.0 to 5.0
         self.confidence_weight = confidence_weight
         
         # Loss functions
         self.text_map_loss = DiceBCELoss()
-        self.box_loss = IoULoss()
+        self.box_loss = EnhancedBoxLoss()  # New improved box loss
         self.confidence_loss = nn.BCELoss()
     
     def forward(self, predictions, targets):
-        """
-        Args:
-            predictions (dict): Model predictions containing 'text_map', 'confidence', 'bbox_coords'
-            targets (dict): Target values containing 'text_map', 'boxes'
-        
-        Returns:
-            float: Combined loss value
-        """
         # Text map segmentation loss
         text_map_loss = self.text_map_loss(predictions['text_map'], targets['text_map'])
         
@@ -49,27 +41,65 @@ class TextDetectionLoss(nn.Module):
                 target_conf = target_boxes[:, 0]
                 target_boxes = target_boxes[:, 1:]  # (N, 4) [x1, y1, x2, y2]
                 
-                # Sample points from predicted boxes at target locations
+                # Improved sampling: Sample multiple points from each target box
                 h, w = pred_conf.shape[1:]
+                sampled_boxes = []
+                sampled_conf = []
                 
-                # Convert target box centers to indices in the prediction map
-                box_centers_y = ((target_boxes[:, 1] + target_boxes[:, 3]) / 2 * h).long().clamp(0, h-1)
-                box_centers_x = ((target_boxes[:, 0] + target_boxes[:, 2]) / 2 * w).long().clamp(0, w-1)
+                for box_idx, box in enumerate(target_boxes):
+                    x1, y1, x2, y2 = box
+                    
+                    # Convert to pixel coordinates
+                    x1_px = int(x1 * w)
+                    y1_px = int(y1 * h)
+                    x2_px = int(x2 * w)
+                    y2_px = int(y2 * h)
+                    
+                    # Ensure valid pixel ranges
+                    x1_px = max(0, min(x1_px, w-1))
+                    y1_px = max(0, min(y1_px, h-1))
+                    x2_px = max(0, min(x2_px, w-1))
+                    y2_px = max(0, min(y2_px, h-1))
+                    
+                    # Sample points: center, corners, and midpoints of edges
+                    sample_points = [
+                        ((y1_px + y2_px) // 2, (x1_px + x2_px) // 2),  # center
+                        (y1_px, x1_px),  # top-left
+                        (y1_px, x2_px),  # top-right
+                        (y2_px, x1_px),  # bottom-left
+                        (y2_px, x2_px),  # bottom-right
+                    ]
+                    
+                    # Filter out duplicates and out-of-bounds
+                    valid_points = []
+                    for y, x in sample_points:
+                        if 0 <= y < h and 0 <= x < w:
+                            if (y, x) not in valid_points:
+                                valid_points.append((y, x))
+                    
+                    for y, x in valid_points:
+                        # Extract predictions at each sampled point
+                        box_pred = pred_boxes[:, y, x]
+                        conf_pred = pred_conf[0, y, x]
+                        
+                        sampled_boxes.append((box_pred, box))
+                        sampled_conf.append((conf_pred, target_conf[box_idx]))
                 
-                # Extract predictions at target box centers
-                sampled_conf = pred_conf[0, box_centers_y, box_centers_x]
-                
-                # Extract box predictions at target centers
-                # pred_boxes: (4, H, W)
-                sampled_boxes = torch.stack([
-                    pred_boxes[j, box_centers_y, box_centers_x] for j in range(4)
-                ], dim=1)  # (N, 4)
-                
-                # Compute box loss
-                box_loss += self.box_loss(sampled_boxes, target_boxes)
-                
-                # Compute confidence loss
-                confidence_loss += self.confidence_loss(sampled_conf, target_conf)
+                # Compute box loss only if we have valid sample points
+                if sampled_boxes:
+                    pred_boxes_tensor = torch.stack([pred for pred, _ in sampled_boxes])
+                    target_boxes_tensor = torch.stack([torch.tensor(target, device=pred_boxes_tensor.device) 
+                                                    for _, target in sampled_boxes])
+                    
+                    # Compute box loss with both IoU and L1 components
+                    box_loss += self.box_loss(pred_boxes_tensor, target_boxes_tensor)
+                    
+                    # Compute confidence loss
+                    if sampled_conf:
+                        pred_conf_tensor = torch.stack([pred for pred, _ in sampled_conf])
+                        target_conf_tensor = torch.stack([torch.tensor(target, device=pred_conf_tensor.device) 
+                                                      for _, target in sampled_conf])
+                        confidence_loss += self.confidence_loss(pred_conf_tensor, target_conf_tensor)
         
         # Average losses over valid samples
         if valid_samples > 0:
@@ -89,8 +119,6 @@ class TextDetectionLoss(nn.Module):
             'box_loss': box_loss,
             'confidence_loss': confidence_loss
         }
-
-
 class DiceBCELoss(nn.Module):
     """Dice and BCE combined loss for segmentation tasks"""
     def __init__(self, weight=None, size_average=True):
@@ -163,7 +191,67 @@ class IoULoss(nn.Module):
         iou_loss = 1 - iou.mean()
         
         return iou_loss
-
+class EnhancedBoxLoss(nn.Module):
+    """Enhanced IoU-based loss for bounding box regression"""
+    def __init__(self):
+        super(EnhancedBoxLoss, self).__init__()
+    
+    def forward(self, pred_boxes, target_boxes):
+        """
+        Args:
+            pred_boxes: (N, 4) [x1, y1, x2, y2]
+            target_boxes: (N, 4) [x1, y1, x2, y2]
+        """
+        # Calculate IoU loss
+        iou_loss = self.iou_loss(pred_boxes, target_boxes)
+        
+        # Calculate regression loss (L1)
+        reg_loss = F.smooth_l1_loss(pred_boxes, target_boxes)
+        
+        # Combine losses
+        combined_loss = iou_loss + 0.5 * reg_loss
+        
+        return combined_loss
+    
+    def iou_loss(self, pred_boxes, target_boxes):
+        # Ensure both are in the same format
+        pred_x1 = pred_boxes[:, 0]
+        pred_y1 = pred_boxes[:, 1]
+        pred_x2 = pred_boxes[:, 2]
+        pred_y2 = pred_boxes[:, 3]
+        
+        target_x1 = target_boxes[:, 0]
+        target_y1 = target_boxes[:, 1]
+        target_x2 = target_boxes[:, 2]
+        target_y2 = target_boxes[:, 3]
+        
+        # Calculate areas
+        pred_area = (pred_x2 - pred_x1) * (pred_y2 - pred_y1)
+        target_area = (target_x2 - target_x1) * (target_y2 - target_y1)
+        
+        # Calculate intersection
+        x1 = torch.max(pred_x1, target_x1)
+        y1 = torch.max(pred_y1, target_y1)
+        x2 = torch.min(pred_x2, target_x2)
+        y2 = torch.min(pred_y2, target_y2)
+        
+        # Intersection height and width
+        w = torch.clamp(x2 - x1, min=0)
+        h = torch.clamp(y2 - y1, min=0)
+        
+        # Intersection area
+        inter = w * h
+        
+        # Calculate union
+        union = pred_area + target_area - inter
+        
+        # Calculate IoU
+        iou = inter / (union + 1e-6)
+        
+        # Use log-based IoU loss for better gradients
+        iou_loss = -torch.log(iou + 1e-6).mean()
+        
+        return iou_loss
 
 def get_loss_function(text_map_weight=1.0, box_weight=5.0, confidence_weight=0.5):
     """Helper function to create the loss function"""
