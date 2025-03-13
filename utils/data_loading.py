@@ -49,106 +49,76 @@ class ReceiptDataset(Dataset):
         # Get sample from dataset
         sample = self.dataset[idx]
         
-        # Print keys in the sample
-        print(f"Sample {idx} keys: {list(sample.keys())}")
-        
-        # Check for OCR boxes
-        if 'ocr_boxes' in sample:
-            ocr_boxes = sample['ocr_boxes']
-            print(f"OCR boxes type: {type(ocr_boxes)}")
-            
-            # If it's a string, it might be JSON
-            if isinstance(ocr_boxes, str):
-                try:
-                    import json
-                    ocr_boxes = json.loads(ocr_boxes)
-                    print(f"Parsed JSON ocr_boxes to list of length {len(ocr_boxes)}")
-                    if len(ocr_boxes) > 0:
-                        print(f"First OCR box item: {ocr_boxes[0]}")
-                except Exception as e:
-                    print(f"Error parsing OCR boxes JSON: {e}")
-                    ocr_boxes = []
-            
-            # Handle list format
-            if isinstance(ocr_boxes, list):
-                print(f"OCR boxes list length: {len(ocr_boxes)}")
-                if len(ocr_boxes) > 0:
-                    print(f"First OCR box: {ocr_boxes[0]}")
-                    # Try to understand its structure
-                    first_box = ocr_boxes[0]
-                    if isinstance(first_box, list) and len(first_box) >= 2:
-                        print(f"Box structure - First element: {type(first_box[0])}")
-                        print(f"Box structure - Second element: {type(first_box[1])}")
-        else:
-            print(f"No 'ocr_boxes' field found in sample")
-        
         # Load image 
         image = self._load_image(sample)
         original_h, original_w = image.shape[:2]
         
-        # Extract OCR boxes
+        # Extract OCR boxes from raw_data
         boxes = []
-        if 'ocr_boxes' in sample:
-            ocr_boxes = sample['ocr_boxes']
-            
-            # Convert from string if needed
-            if isinstance(ocr_boxes, str):
-                try:
-                    ocr_boxes = json.loads(ocr_boxes)
-                except:
-                    ocr_boxes = []
-            
-            # Process each box
-            for box_data in ocr_boxes:
-                try:
-                    # Format: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], (text, confidence)
-                    polygon = box_data[0]
-                    text_conf = box_data[1]
+        if 'raw_data' in sample:
+            try:
+                # Parse raw_data as JSON
+                import json
+                raw_data = json.loads(sample['raw_data'])
+                
+                # Extract ocr_boxes
+                if 'ocr_boxes' in raw_data:
+                    ocr_boxes = raw_data['ocr_boxes']
                     
-                    # Extract coordinates
-                    x_vals = [p[0] for p in polygon]
-                    y_vals = [p[1] for p in polygon]
-                    x1, y1 = min(x_vals), min(y_vals)
-                    x2, y2 = max(x_vals), max(y_vals)
-                    
-                    # Extract confidence
-                    conf = float(text_conf[1]) if isinstance(text_conf, (list, tuple)) and len(text_conf) > 1 else 1.0
-                    
-                    # Create normalized box [conf, x1, y1, x2, y2]
-                    norm_x1 = float(x1) / original_w
-                    norm_y1 = float(y1) / original_h
-                    norm_x2 = float(x2) / original_w
-                    norm_y2 = float(y2) / original_h
-                    
-                    # Add to boxes list
-                    boxes.append([conf, norm_x1, norm_y1, norm_x2, norm_y2])
-                except Exception as e:
-                    print(f"Error processing box: {e}")
+                    # Process each box
+                    for box_data in ocr_boxes:
+                        try:
+                            # Format: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], (text, confidence)
+                            polygon = box_data[0]
+                            text_conf = box_data[1]
+                            
+                            # Extract coordinates
+                            x_vals = [p[0] for p in polygon]
+                            y_vals = [p[1] for p in polygon]
+                            x1, y1 = min(x_vals), min(y_vals)
+                            x2, y2 = max(x_vals), max(y_vals)
+                            
+                            # Extract confidence
+                            conf = float(text_conf[1]) if isinstance(text_conf, (list, tuple)) and len(text_conf) > 1 else 1.0
+                            
+                            # Create normalized box [conf, x1, y1, x2, y2]
+                            norm_x1 = float(x1) / original_w
+                            norm_y1 = float(y1) / original_h
+                            norm_x2 = float(x2) / original_w
+                            norm_y2 = float(y2) / original_h
+                            
+                            # Add to boxes list
+                            boxes.append([conf, norm_x1, norm_y1, norm_x2, norm_y2])
+                        except Exception as e:
+                            print(f"Error processing box: {e}")
+            except Exception as e:
+                print(f"Error parsing raw_data: {e}")
         
-        # Create text map (for segmentation)
+        # Create text map based on boxes
         text_map = np.zeros((original_h, original_w), dtype=np.float32)
         for box in boxes:
             _, x1, y1, x2, y2 = box
-            # Convert normalized coordinates back to absolute
-            abs_x1 = int(x1 * original_w)
-            abs_y1 = int(y1 * original_h)
-            abs_x2 = int(x2 * original_w)
-            abs_y2 = int(y2 * original_h)
-            # Fill the text map
-            text_map[abs_y1:abs_y2, abs_x1:abs_x2] = 1.0
+            # Convert to absolute pixel coordinates
+            x1_px, y1_px = int(x1 * original_w), int(y1 * original_h)
+            x2_px, y2_px = int(x2 * original_w), int(y2 * original_h)
+            # Ensure valid coordinates
+            x1_px = max(0, min(x1_px, original_w-1))
+            y1_px = max(0, min(y1_px, original_h-1))
+            x2_px = max(x1_px+1, min(x2_px, original_w))
+            y2_px = max(y1_px+1, min(y2_px, original_h))
+            # Fill text map
+            text_map[y1_px:y2_px, x1_px:x2_px] = 1.0
         
-        # Apply transforms to image
+        # Apply transforms
         transformed = self.transforms(image=image, mask=text_map)
-        image = transformed['image']  # Now a tensor
-        text_map = transformed['mask']  # Also a tensor
+        image = transformed['image']
+        text_map = transformed['mask']
         
         # Add batch dimension to text map
         text_map = text_map.unsqueeze(0)
         
-        # Debug info
-        print(f"Sample {idx}: {len(boxes)} boxes found")
-        if len(boxes) > 0:
-            print(f"First box: {boxes[0]}")
+        # Print debug info
+        print(f"Sample {idx}: Found {len(boxes)} boxes")
         
         return {
             'image': image,
