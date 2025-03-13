@@ -1,0 +1,15 @@
+# Receipt OCR Character Set
+# First line (blank space)
+ 
+# Numbers
+0123456789
+# Lowercase letters
+abcdefghijklmnopqrstuvwxyz
+# Uppercase letters
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+# Punctuation
+,.;:!?'"()[]{}-_/\&@#$%^*+=|~`<>
+# Special symbols common in receipts
+€£¥¢$₹₽₩
+# Date/time symbols
+:/-.

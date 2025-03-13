@@ -1,4 +1,0 @@
-Starting training for text_detection
-Device: cpu
-Epochs: 50
-==================================================

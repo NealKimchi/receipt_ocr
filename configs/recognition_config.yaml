@@ -1,0 +1,96 @@
+# Configuration for receipt text recognition model with custom architecture
+
+model:
+  name: 'CRNN'  # Convolutional Recurrent Neural Network
+  input_channels: 3   # RGB input
+  hidden_size: 256    # Size of RNN hidden state
+  dropout_rate: 0.2   # Dropout rate for regularization
+  bidirectional: true # Whether RNN is bidirectional
+  attention: true     # Whether to use attention mechanism
+  backbone: 'custom'  # Use custom backbone (fixed to work with this value)
+  # Feature map size after CNN
+  feature_height: 4   # Fixed by adaptive pooling in custom extractor
+  # Feature sequence length (determined by input width)
+  feature_width: 32
+  # Additional architecture details
+  num_rnn_layers: 2   # Number of RNN layers
+  rnn_type: 'lstm'    # 'lstm' or 'gru'
+
+# Rest of the configuration remains the same
+data:
+  dataset_name: "mychen76/invoices-and-receipts_ocr_v2"  # Hugging Face dataset
+  alphabet_path: "data/alphabet.txt"  # Path to alphabet file
+  max_text_length: 32  # Maximum text length to recognize
+  # Image parameters
+  image_height: 32  # Height to resize text regions to
+  image_width: 128  # Width to resize text regions to
+  keep_aspect_ratio: true  # Whether to maintain aspect ratio during resizing
+  # Data loading
+  train_batch_size: 32  # Batch size for training
+  val_batch_size: 64  # Batch size for validation
+  num_workers: 4  # Number of workers for data loading
+  # Data augmentation
+  use_augmentation: true  # Whether to use data augmentation
+  augmentation_probability: 0.5  # Probability of applying augmentation
+
+# Rest of the configuration remains unchanged
+
+loss:
+  type: 'ctc'  # 'ctc' or 'attention'
+  blank_index: 0  # Index of blank token for CTC
+  # CTC weight for combined CTC+Attention (0.0-1.0, 1.0 = pure CTC)
+  ctc_weight: 0.8  # Weight for CTC loss (if using combined loss)
+  # Label smoothing factor (0.0-1.0, 0.0 = no smoothing)
+  label_smoothing: 0.1
+
+training:
+  batch_size: 32  # Batch size for training
+  epochs: 30  # Number of epochs to train
+  learning_rate: 0.001  # Initial learning rate
+  weight_decay: 0.0001  # L2 regularization
+  # Optimizer settings
+  optimizer: "adam"  # "adam" or "sgd"
+  beta1: 0.9  # Beta1 for Adam optimizer
+  beta2: 0.999  # Beta2 for Adam optimizer
+  momentum: 0.9  # Momentum for SGD optimizer
+  
+  # Logging and visualization
+  log_interval: 50  # Print loss every N batches
+  visualization_interval: 200  # Visualize predictions every N batches
+  eval_interval: 1  # Evaluate every N epochs
+  save_interval: 5  # Save model every N epochs
+  
+  # Learning rate scheduler
+  use_scheduler: true  # Whether to use a scheduler
+  lr_scheduler: "cosine"  # "step", "cosine", "reduce_on_plateau"
+  lr_step_size: 10  # Step size for StepLR
+  lr_gamma: 0.1  # Gamma for StepLR
+  warmup_epochs: 2  # Number of epochs for warmup
+  min_lr: 0.000001  # Minimum learning rate (1e-6)
+  
+  # Early stopping
+  early_stopping: true  # Whether to use early stopping
+  patience: 10  # Number of epochs to wait for improvement
+  
+  # Advanced training features
+  gradient_clipping: true  # Whether to clip gradients
+  clip_value: 5.0  # Maximum gradient norm
+  mixed_precision: true  # Whether to use mixed precision training
+
+evaluation:
+  # Text recognition metrics
+  use_cer: true  # Character Error Rate
+  use_wer: true  # Word Error Rate
+  case_sensitive: false  # Whether evaluation is case-sensitive
+  ignore_punctuation: true  # Whether to ignore punctuation in evaluation
+  confidence_threshold: 0.5  # Threshold for accepting predictions
+  
+inference:
+  beam_width: 5  # Beam width for CTC beam search decoding
+  normalize_confidence: true  # Whether to normalize confidence scores
+  min_height: 8  # Minimum height of text regions to process
+  char_width_ratio: 0.125  # Expected width/height ratio per character
+
+paths:
+  output_dir: "outputs/recognition"  # Directory to save outputs
+  saved_model: "outputs/recognition/best_model.pth"  # Path to save best model
