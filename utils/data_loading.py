@@ -111,7 +111,7 @@ class ReceiptDataset(Dataset):
             'boxes': normalized_boxes,
             'image_id': sample.get('id', str(idx))
         }
-    
+ 
     def _load_image(self, sample):
         """Load image from sample - handles different formats"""
         try:
@@ -205,7 +205,38 @@ class ReceiptDataset(Dataset):
         except Exception as e:
             # If there's an error, just return empty lists
             return words, boxes, confidences
-
+        
+def receipt_collate_fn(batch):
+    """
+    Custom collate function for receipt dataset with variable-sized box data
+    Args:
+        batch: List of samples returned by __getitem__
+    Returns:
+        Collated batch with 'image', 'text_map', 'boxes', 'image_id'
+    """
+    # Collect items of the same type together
+    images = []
+    text_maps = []
+    boxes = []
+    image_ids = []
+    
+    for sample in batch:
+        images.append(sample['image'])
+        text_maps.append(sample['text_map'])
+        boxes.append(sample['boxes'])
+        image_ids.append(sample['image_id'])
+    
+    # Stack tensors where possible
+    images = torch.stack(images, dim=0)
+    text_maps = torch.stack(text_maps, dim=0)
+    
+    # Return as dictionary
+    return {
+        'image': images,
+        'text_map': text_maps,
+        'boxes': boxes,  # Keep as list of lists
+        'image_id': image_ids  # Keep as list
+    }
 
 def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2", 
                      batch_size=8, image_size=(512, 512), num_workers=4, 
@@ -231,13 +262,14 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
         cache_dir=cache_dir
     )
     
-    # Create data loaders
+    # Create data loaders with custom collate function
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        collate_fn=None  # Use default collate_fn as we're returning a dict
+        collate_fn=receipt_collate_fn,
+        pin_memory=True
     )
     
     val_loader = DataLoader(
@@ -245,7 +277,8 @@ def get_data_loaders(dataset_name="mychen76/invoices-and-receipts_ocr_v2",
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        collate_fn=None  # Use default collate_fn as we're returning a dict
+        collate_fn=receipt_collate_fn,
+        pin_memory=True
     )
     
     return train_loader, val_loader
