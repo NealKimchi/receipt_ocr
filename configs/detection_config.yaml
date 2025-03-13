@@ -1,47 +1,86 @@
-# Configuration for text detection model
+# Configuration for receipt text detection model
 
 model:
   name: 'TextDetectionModel'
-  in_channels: 3
-  out_channels: 1
-  init_filters: 64
-  dropout_rate: 0.2
-
-training:
-  batch_size: 8
-  num_epochs: 10
-  learning_rate: 0.001
-  weight_decay: 0.0001
-  scheduler_patience: 5
-  scheduler_factor: 0.5
-  early_stopping_patience: 10
-  save_interval: 5
-  eval_interval: 1
-  num_workers: 4
-  log_interval: 10
-  visualization_interval: 50
-  use_scheduler: true
+  in_channels: 3  # RGB input
+  out_channels: 1  # Binary text map
+  init_filters: 64  # Initial number of filters in the model
+  dropout_rate: 0.2  # Dropout rate for regularization
 
 data:
-  dataset_name: "mychen76/invoices-and-receipts_ocr_v2"
-  image_size: [512, 512]
-  data_dir: 'data/'
-  train_split: 0.8
-  val_split: 0.1
-  test_split: 0.1
-  max_samples: null  # Set to a number for testing, null for full dataset
+  dataset_name: "mychen76/invoices-and-receipts_ocr_v2"  # Hugging Face dataset
+  image_size: [512, 512]  # Input image size (height, width)
+  data_dir: 'data/'  # Local data directory
+  train_split: 0.8  # Training set portion
+  val_split: 0.1  # Validation set portion
+  test_split: 0.1  # Test set portion
+  num_workers: 4  # Number of workers for data loading
+  max_samples: null  # Set to an integer to limit dataset size for debugging, null for full dataset
+  cache_dir: null  # Cache directory for Hugging Face datasets
+  # Enhanced augmentation parameters
   augmentation:
-    rotation_range: 10
-    brightness_contrast_range: 0.2
-    scale_range: [0.8, 1.0]
+    rotation_range: 10  # Maximum rotation in degrees
+    brightness_contrast_range: 0.2  # Range for brightness/contrast adjustments
+    scale_range: [0.8, 1.0]  # Random scaling range
+    use_advanced_augmentations: true  # Whether to use the enhanced augmentations
 
 loss:
-  text_map_weight: 1.0
-  box_weight: 20.0
-  confidence_weight: 1.0
-  dice_bce_ratio: 0.5
+  text_map_weight: 1.0  # Weight for text map loss
+  box_weight: 0.1  # Weight for box loss (reduced from 20.0 to prevent domination)
+  confidence_weight: 0.5  # Weight for confidence loss
+  dice_bce_ratio: 0.5  # Ratio of Dice to BCE loss for text map
+  use_focal_loss: true  # Whether to use focal loss for confidence
+  focal_gamma: 2.0  # Gamma parameter for focal loss
+  use_giou_loss: true  # Whether to use GIoU loss for boxes
 
+training:
+  batch_size: 8  # Batch size for training
+  num_epochs: 20  # Total number of epochs (increased from 10)
+  learning_rate: 1e-4  # Initial learning rate (reduced from 0.001)
+  weight_decay: 0.0001  # L2 regularization
+  num_workers: 4  # Number of workers for data loading
+  
+  # Logging and visualization
+  log_interval: 10  # Print loss every N batches
+  visualization_interval: 50  # Visualize predictions every N batches
+  eval_interval: 1  # Evaluate every N epochs
+  save_interval: 5  # Save model every N epochs
+  
+  # Learning rate scheduler (improved)
+  use_scheduler: true  # Whether to use a scheduler
+  scheduler_type: "cosine_warmup"  # "step", "cosine", "cosine_warmup", "reduce_on_plateau"
+  scheduler_patience: 5  # Patience for ReduceLROnPlateau
+  scheduler_factor: 0.5  # Factor for ReduceLROnPlateau
+  warmup_epochs: 3  # Number of epochs for warmup (for cosine_warmup)
+  warmup_mult: 2  # Multiplier for warmup cycles (for cosine_warmup)
+  min_lr: 1e-6  # Minimum learning rate for scheduler
+  
+  # Early stopping
+  early_stopping_patience: 10  # Number of epochs to wait for improvement
+  use_early_stopping: true  # Whether to use early stopping
+  
+  # Advanced training features
+  use_gradient_clipping: true  # Whether to clip gradients
+  gradient_clip_value: 10.0  # Maximum gradient norm
+  use_hard_example_mining: true  # Whether to use hard example mining
+  hard_example_ratio: 0.7  # Ratio of hard examples to keep
+
+evaluation:
+  confidence_threshold: 0.3  # Threshold for text detection (lowered from 0.5 for better recall)
+  iou_threshold: 0.3  # IoU threshold for box matching (same as nms_threshold)
+  max_boxes: 100  # Maximum number of boxes to detect
+  evaluate_f1: true  # Whether to compute F1 score
+  evaluate_precision: true  # Whether to compute precision
+  evaluate_recall: true  # Whether to compute recall
+  
 inference:
-  confidence_threshold: 0.5
-  nms_threshold: 0.3
-  max_boxes: 100
+  confidence_threshold: 0.4  # Threshold for text detection during inference
+  nms_threshold: 0.3  # Non-maximum suppression threshold
+  max_boxes: 100  # Maximum number of boxes to detect
+
+output:
+  save_visualizations: true  # Save visualization images
+  save_model: true  # Save model checkpoints
+  save_best_f1: true  # Save model with best F1 score
+  save_best_loss: true  # Save model with best validation loss
+  output_dir: "outputs/detection"  # Directory to save outputs

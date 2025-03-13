@@ -9,6 +9,78 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from datasets import load_dataset
 import re
+import random
+
+class ReceiptAugmentation:
+    """Enhanced augmentation pipeline specifically for receipt OCR"""
+    def __init__(self, p=0.7, image_size=(512, 512)):
+        self.p = p
+        self.image_size = image_size
+        
+        # Create strong augmentations for text detection
+        self.transforms = A.Compose([
+            A.Resize(height=image_size[0], width=image_size[1]),
+            
+            # Random rotation (limited to preserve text readability)
+            A.SafeRotate(limit=15, border_mode=cv2.BORDER_CONSTANT, p=0.5),
+            
+            # Light distortions
+            A.OneOf([
+                A.OpticalDistortion(distort_limit=0.2, shift_limit=0.15),
+                A.GridDistortion(num_steps=5, distort_limit=0.3),
+                A.ElasticTransform(alpha=1, sigma=10, alpha_affine=10),
+            ], p=0.3),
+            
+            # Color adjustments for different lighting
+            A.OneOf([
+                A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3),
+                A.RandomGamma(gamma_limit=(80, 120)),
+                A.CLAHE(clip_limit=4.0, p=0.5),
+            ], p=0.5),
+            
+            # Noise to simulate scanner artifacts
+            A.OneOf([
+                A.GaussNoise(var_limit=(10.0, 50.0)),
+                A.MultiplicativeNoise(multiplier=(0.9, 1.1)),
+                A.ISONoise(intensity=(0.1, 0.5), color_shift=(0.01, 0.05)),
+            ], p=0.3),
+            
+            # Blur for out-of-focus scenarios
+            A.OneOf([
+                A.GaussianBlur(blur_limit=3),
+                A.MotionBlur(blur_limit=3),
+            ], p=0.2),
+            
+            # Normalization and conversion to tensor
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ToTensorV2(),
+        ])
+    
+    def __call__(self, image, mask=None, boxes=None):
+        """Apply transformations to image and mask/boxes"""
+        # Only apply augmentations with probability p
+        if random.random() < self.p:
+            # Apply transformations with mask
+            if mask is not None:
+                transformed = self.transforms(image=image, mask=mask)
+                return transformed['image'], transformed['mask']
+            else:
+                transformed = self.transforms(image=image)
+                return transformed['image']
+        
+        # If not applying augmentations, just resize and normalize
+        basic_transform = A.Compose([
+            A.Resize(height=self.image_size[0], width=self.image_size[1]),
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ToTensorV2(),
+        ])
+        
+        if mask is not None:
+            transformed = basic_transform(image=image, mask=mask)
+            return transformed['image'], transformed['mask']
+        else:
+            transformed = basic_transform(image=image)
+            return transformed['image']
 
 class ReceiptDataset(Dataset):
     """Dataset for receipt OCR text detection"""
@@ -37,20 +109,30 @@ class ReceiptDataset(Dataset):
         print(f"Loaded {len(self.dataset)} samples for {split} split")
         
         # Define transforms for images and masks
-        self.transforms = A.Compose([
-            A.Resize(height=image_size[0], width=image_size[1]),
-            A.OneOf([
-                A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3),
-                A.RandomGamma(gamma_limit=(80, 120)),
-            ], p=0.5),
-            A.OneOf([
-                A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, p=0.5),
-                A.GridDistortion(p=0.5),
-                A.OpticalDistortion(distort_limit=2, shift_limit=0.5, p=0.5),
-            ], p=0.3),
-            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ToTensorV2(),
-        ])
+        if split == 'train':
+            # Use enhanced augmentations for training
+            self.receipt_aug = ReceiptAugmentation(p=0.7, image_size=image_size)
+            self.transforms = A.Compose([
+                A.Resize(height=image_size[0], width=image_size[1]),
+                A.OneOf([
+                    A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3),
+                    A.RandomGamma(gamma_limit=(80, 120)),
+                ], p=0.5),
+                A.OneOf([
+                    A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, p=0.5),
+                    A.GridDistortion(p=0.5),
+                    A.OpticalDistortion(distort_limit=2, shift_limit=0.5, p=0.5),
+                ], p=0.3),
+                A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ToTensorV2(),
+            ])
+        else:
+            # Only resize and normalize for validation
+            self.transforms = A.Compose([
+                A.Resize(height=image_size[0], width=image_size[1]),
+                A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ToTensorV2(),
+            ])
     
     def __len__(self):
         return len(self.dataset)
@@ -111,7 +193,7 @@ class ReceiptDataset(Dataset):
         text_map = text_map.unsqueeze(0)
         
         # Print debug info
-        if idx % 100 == 0:  # Only print occasionally to reduce output
+        if idx % 500 == 0:  # Reduce frequency for less output spam
             print(f"Sample {idx}: Found {len(valid_boxes)} valid boxes")
         
         return {
@@ -214,6 +296,38 @@ class ReceiptDataset(Dataset):
         except Exception as e:
             # If there's an error, just return empty lists
             return words, boxes, confidences
+
+class HardExampleMining:
+    """Hard example mining for focusing on difficult samples"""
+    def __init__(self, ratio=0.7):
+        """
+        Args:
+            ratio: Percentage of hard examples to keep in each batch
+        """
+        self.ratio = ratio
+    
+    def __call__(self, losses, batch_size):
+        """
+        Filter a batch by keeping only the hard examples
+        
+        Args:
+            losses: Loss values for each example in the batch
+            batch_size: Original batch size
+        
+        Returns:
+            mask: Boolean mask of examples to keep
+        """
+        # Determine number of samples to keep
+        k = max(1, int(batch_size * self.ratio))
+        
+        # Get the indices of the k highest losses
+        _, indices = torch.topk(losses, k=k)
+        
+        # Create a mask of samples to keep
+        mask = torch.zeros_like(losses, dtype=torch.bool)
+        mask[indices] = True
+        
+        return mask
         
 def receipt_collate_fn(batch):
     """
