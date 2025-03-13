@@ -1,3 +1,8 @@
+# save this as test_dataset.py
+import torch
+from datasets import load_dataset
+import json
+
 # Modified test script
 def test_dataset():
     # Load the dataset
