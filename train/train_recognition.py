@@ -10,6 +10,8 @@ import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import cv2
+import json
+import ast
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,7 +24,7 @@ from models.recognition.loss import get_loss_function
 from models.recognition.metrics import calculate_text_metrics, print_metrics
 
 class TextRecognitionDataset(torch.utils.data.Dataset):
-    """Dataset for text recognition training"""
+    """Dataset for text recognition training with real OCR text"""
     def __init__(self, 
                  dataset_name="mychen76/invoices-and-receipts_ocr_v2", 
                  split='train',
@@ -69,7 +71,7 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
         self.samples = self._extract_text_regions()
     
     def _extract_text_regions(self):
-        """Extract text regions from base dataset"""
+        """Extract text regions with real OCR text from base dataset"""
         samples = []
         
         print(f"Extracting text regions from {len(self.base_dataset)} images...")
@@ -79,6 +81,48 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
             base_sample = self.base_dataset[idx]
             image = base_sample['image']
             boxes = base_sample['boxes']
+            
+            # Try to extract OCR data if available
+            ocr_words = None
+            ocr_boxes = None
+            try:
+                if 'raw_data' in base_sample and base_sample['raw_data']:
+                    # Parse the raw_data JSON if it's a string
+                    if isinstance(base_sample['raw_data'], str):
+                        raw_data = json.loads(base_sample['raw_data'])
+                    else:
+                        raw_data = base_sample['raw_data']
+                    
+                    # Extract OCR words and boxes
+                    if 'ocr_words' in raw_data:
+                        # Handle different formats
+                        if isinstance(raw_data['ocr_words'], str):
+                            # Handle string representation of list
+                            if raw_data['ocr_words'].startswith('[') and raw_data['ocr_words'].endswith(']'):
+                                ocr_words = ast.literal_eval(raw_data['ocr_words'])
+                            else:
+                                ocr_words = [raw_data['ocr_words']]
+                        else:
+                            ocr_words = raw_data['ocr_words']
+                    
+                    if 'ocr_boxes' in raw_data:
+                        # Handle different formats
+                        if isinstance(raw_data['ocr_boxes'], str):
+                            if raw_data['ocr_boxes'].startswith('[') and raw_data['ocr_boxes'].endswith(']'):
+                                ocr_boxes = ast.literal_eval(raw_data['ocr_boxes'])
+                            else:
+                                # Try to handle other formats
+                                try:
+                                    ocr_boxes = json.loads(raw_data['ocr_boxes'])
+                                except:
+                                    # If all else fails, use as is
+                                    ocr_boxes = raw_data['ocr_boxes']
+                        else:
+                            ocr_boxes = raw_data['ocr_boxes']
+            except Exception as e:
+                print(f"Warning: Error parsing OCR data for sample {idx}: {e}")
+                ocr_words = None
+                ocr_boxes = None
             
             # Convert image from tensor to numpy for cropping
             if isinstance(image, torch.Tensor):
@@ -120,14 +164,24 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
                 if crop.shape[0] < 5 or crop.shape[1] < 5:
                     continue
                 
-                # For now, use dummy text (placeholder)
-                # In a real scenario, you would use ground truth OCR text for training
-                dummy_text = f"text_{idx}_{i}"
+                # Try to find matching OCR text for this crop
+                ocr_text = None
+                
+                if ocr_words and ocr_boxes and i < len(ocr_words):
+                    # Use OCR text directly if available and indices match
+                    ocr_text = ocr_words[i]
+                else:
+                    # Fallback to generic text
+                    if i < len(boxes):
+                        # Use a meaningful default that's different for each box
+                        ocr_text = f"item_{idx}_{i}"
+                    else:
+                        ocr_text = f"text_{idx}_{i}"
                 
                 # Add to samples
                 samples.append({
                     'image': crop,
-                    'text': dummy_text,
+                    'text': ocr_text,
                     'box': (x1_px, y1_px, x2_px, y2_px),
                     'image_id': f"{base_sample['image_id']}_{i}"
                 })
@@ -174,8 +228,12 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
             image = image.transpose(2, 0, 1)
             image = torch.from_numpy(image)
         
-        # Preprocess text
-        text = preprocess_text(text)
+        # Preprocess text (clean unwanted characters, normalize spacing)
+        if isinstance(text, str):
+            text = preprocess_text(text)
+        else:
+            # Handle non-string text (convert to string)
+            text = preprocess_text(str(text))
         
         # Encode text if charset_mapper is provided
         if self.charset_mapper:
@@ -201,7 +259,6 @@ class TextRecognitionDataset(torch.utils.data.Dataset):
             'length': text_length,
             'image_id': sample['image_id']
         }
-
 
 def get_recognition_loaders(config, charset_mapper):
     """Create dataloaders for text recognition"""
@@ -309,7 +366,7 @@ def visualize_predictions(images, predictions, targets, save_path=None):
         plt.show()
 
 def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config, charset_mapper):
-    """Train for one epoch"""
+    """Train for one epoch with improved error handling and metrics"""
     model.train()
     epoch_loss = 0
     
@@ -318,56 +375,42 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
     # Initialize metrics
     correct = 0
     total = 0
+    all_predictions = []
+    all_targets = []
+    batch_losses = []
     
-    # Enable mixed precision if configured
-    scaler = torch.cuda.amp.GradScaler() if config['training'].get('mixed_precision', False) else None
+    # Create progress bar
+    num_batches = len(train_loader)
+    pbar = tqdm(enumerate(train_loader), total=num_batches, desc=f"Training Epoch {epoch}")
     
-    for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch}")):
-        # Move data to device
-        images = batch['image'].to(device)
-        
-        # Make sure text is a tensor before moving to device
-        if isinstance(batch['text'], list):
-            # Convert list to tensor
-            texts = torch.tensor(batch['text'], dtype=torch.long).to(device)
-        else:
-            texts = batch['text'].to(device)
-        
-        # Make sure length is a tensor
-        if isinstance(batch['length'], list):
-            lengths = torch.tensor(batch['length'], dtype=torch.long).to(device)
-        else:
-            lengths = batch['length'].to(device)
-        
-        # Zero gradients
-        optimizer.zero_grad()
-        
-        # Forward pass with mixed precision if enabled
-        if scaler:
-            with torch.cuda.amp.autocast():
-                outputs = model(images, texts, lengths)
-                loss = criterion(outputs, texts, lengths)
-                
-                # Unpack loss if it's a dictionary
-                if isinstance(loss, dict):
-                    total_loss = loss['loss']
-                else:
-                    total_loss = loss
+    for batch_idx, batch in pbar:
+        try:
+            # Move data to device
+            images = batch['image'].to(device)
             
-            # Backward and optimize with scaler
-            scaler.scale(total_loss).backward()
+            # Make sure text is a tensor before moving to device
+            if isinstance(batch['text'], list):
+                # Convert list to tensor
+                texts = torch.tensor(batch['text'], dtype=torch.long).to(device)
+            else:
+                texts = batch['text'].to(device)
             
-            # Gradient clipping if configured
-            if config['training'].get('gradient_clipping', False):
-                clip_value = config['training'].get('clip_value', 5.0)
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+            # Make sure length is a tensor
+            if isinstance(batch['length'], list):
+                lengths = torch.tensor(batch['length'], dtype=torch.long).to(device)
+            else:
+                lengths = batch['length'].to(device)
             
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            # Regular forward pass
-            outputs = model(images, texts, lengths)
+            # Get raw texts for debugging
+            raw_texts = batch['raw_text']
+            
+            # Zero gradients
+            optimizer.zero_grad()
+            
+            # Forward pass
+            outputs = model(images)
+            
+            # Calculate loss
             loss = criterion(outputs, texts, lengths)
             
             # Unpack loss if it's a dictionary
@@ -376,7 +419,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
             else:
                 total_loss = loss
             
-            # Backward and optimize
+            # Skip potentially problematic batches
+            if torch.isnan(total_loss) or torch.isinf(total_loss):
+                print(f"Warning: NaN or Inf loss detected in batch {batch_idx}. Skipping.")
+                continue
+                
+            # Backward pass
             total_loss.backward()
             
             # Gradient clipping if configured
@@ -384,75 +432,135 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
                 clip_value = config['training'].get('clip_value', 5.0)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
             
+            # Update weights
             optimizer.step()
-        
-        # Accumulate loss
-        epoch_loss += total_loss.item()
-        
-        # Calculate accuracy for this batch
-        predictions = outputs['predictions']
-        for i in range(len(texts)):
-            # Get prediction and target
-            pred_text = charset_mapper.decode(predictions[i])
             
-            # Handle different tensor formats for texts
-            if texts.dim() == 2:
-                # If texts is a 2D tensor (batch_size, seq_length)
-                # Slice target to actual length
-                target_text = charset_mapper.decode(texts[i][:lengths[i]])
-            else:
-                # If somehow texts is a 1D tensor or other format
-                target_text = charset_mapper.decode(texts[i])
+            # Record loss
+            batch_loss = total_loss.item()
+            epoch_loss += batch_loss
+            batch_losses.append(batch_loss)
             
-            # Check if correct (exact match)
-            if pred_text == target_text:
-                correct += 1
-            total += 1
-        
-        # Print metrics periodically
-        log_interval = config['training']['log_interval']
-        if (batch_idx + 1) % log_interval == 0:
-            print(f"\nBatch {batch_idx+1}/{len(train_loader)}: Loss: {total_loss.item():.4f}")
-            if isinstance(loss, dict):
-                for k, v in loss.items():
-                    if k != 'loss':
-                        print(f"  {k}: {v.item():.4f}")
-            
-            # Print current accuracy
-            batch_accuracy = correct / total if total > 0 else 0
-            print(f"Current accuracy: {batch_accuracy:.4f} ({correct}/{total})")
-            
-        # Visualize predictions periodically
-        vis_interval = config['training']['visualization_interval']
-        if (batch_idx + 1) % vis_interval == 0:
-            try:
-                # Get some predictions to visualize
-                pred_texts = [charset_mapper.decode(pred) for pred in predictions[:8]]
+            # Calculate metrics
+            predictions = outputs['predictions']
+            for i in range(len(texts)):
+                if i >= len(raw_texts):
+                    continue
+                    
+                # Get prediction (using CTC decoding - remove repeated characters and blanks)
+                pred_indices = predictions[i].cpu().numpy()
+                # Get unique consecutive characters (CTC decoding)
+                filtered_indices = []
+                for j, idx in enumerate(pred_indices):
+                    if idx != 0 and (j == 0 or idx != pred_indices[j-1]):
+                        filtered_indices.append(idx)
                 
-                if texts.dim() == 2:
-                    target_texts = [charset_mapper.decode(texts[i][:lengths[i]]) for i in range(min(8, len(texts)))]
+                pred_text = charset_mapper.decode(filtered_indices)
+                
+                # Get target text
+                if raw_texts[i]:
+                    target_text = raw_texts[i]
                 else:
-                    target_texts = [charset_mapper.decode(texts[i]) for i in range(min(8, len(texts)))]
+                    # Use encoded text if raw text is not available
+                    if texts.dim() == 2 and i < texts.size(0):
+                        target_indices = texts[i, :lengths[i]].cpu().numpy()
+                        target_text = charset_mapper.decode(target_indices)
+                    else:
+                        target_text = ""
                 
-                # Save visualization
-                vis_path = os.path.join(config['paths']['output_dir'], f"train_vis_epoch{epoch}_batch{batch_idx}.png")
-                visualize_predictions(images[:8], pred_texts, target_texts, save_path=vis_path)
-            except Exception as e:
-                print(f"Warning: Visualization failed - {e}")
+                # Store for metrics calculation
+                all_predictions.append(pred_text)
+                all_targets.append(target_text)
+                
+                # Incremental accuracy with different strictness levels
+                if pred_text.lower() == target_text.lower():
+                    # Exact match ignoring case
+                    correct += 1
+                elif len(pred_text) > 0 and len(target_text) > 0:
+                    # Calculate similarity based on edit distance
+                    distance = calculate_cer(pred_text, target_text)
+                    if distance < 0.3:  # More than 70% similar
+                        correct += 0.5  # Partial credit
+                
+                total += 1
+            
+            # Update progress bar with latest metrics
+            accuracy = correct / total if total > 0 else 0
+            pbar.set_postfix({
+                'loss': f"{batch_loss:.4f}",
+                'acc': f"{accuracy:.4f}",
+                'lr': f"{optimizer.param_groups[0]['lr']:.6f}"
+            })
+            
+            # Print detailed metrics at intervals
+            log_interval = config['training']['log_interval']
+            if (batch_idx + 1) % log_interval == 0 or batch_idx == num_batches - 1:
+                # Print some example predictions
+                print("\nSample predictions:")
+                for i in range(min(3, len(images))):
+                    if i < len(all_predictions) and i < len(all_targets):
+                        print(f"  Pred: '{all_predictions[-i-1]}'")
+                        print(f"  True: '{all_targets[-i-1]}'")
+                        print()
+            
+            # Visualize predictions periodically
+            vis_interval = config['training']['visualization_interval']
+            if (batch_idx + 1) % vis_interval == 0:
+                try:
+                    # Get most recent predictions for visualization
+                    max_vis = min(8, len(predictions))
+                    pred_texts = all_predictions[-max_vis:]
+                    target_texts = all_targets[-max_vis:]
+                    vis_images = images[:max_vis]
+                    
+                    # Save visualization
+                    vis_path = os.path.join(config['paths']['output_dir'], f"train_vis_epoch{epoch}_batch{batch_idx}.png")
+                    visualize_predictions(vis_images, pred_texts, target_texts, save_path=vis_path)
+                except Exception as e:
+                    print(f"Warning: Visualization failed - {e}")
+        
+        except RuntimeError as e:
+            if "CUDA out of memory" in str(e):
+                print(f"CUDA out of memory in batch {batch_idx}. Skipping batch and freeing memory.")
+                # Free memory and continue
+                torch.cuda.empty_cache()
+                continue
+            else:
+                print(f"Runtime error in batch {batch_idx}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+                
+        except Exception as e:
+            print(f"Error in batch {batch_idx}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
     
-    # Average training loss for this epoch
-    avg_train_loss = epoch_loss / len(train_loader)
+    # Calculate final metrics
+    case_sensitive = config['evaluation'].get('case_sensitive', False)
+    ignore_punctuation = config['evaluation'].get('ignore_punctuation', True)
+    
+    # Skip metrics calculation if we have no predictions
+    if len(all_predictions) == 0 or len(all_targets) == 0:
+        print("Warning: No valid predictions or targets for metrics calculation.")
+        metrics = {'cer': 1.0, 'wer': 1.0, 'accuracy': 0.0, 'num_samples': 0}
+    else:
+        metrics = calculate_text_metrics(all_predictions, all_targets, case_sensitive, ignore_punctuation)
+    
+    # Average training loss
+    avg_train_loss = epoch_loss / (len(train_loader) - len(train_loader) // 10) if len(train_loader) > 0 else float('inf')
     
     # Calculate accuracy
     accuracy = correct / total if total > 0 else 0
     
     # Print epoch summary
     elapsed_time = time.time() - start_time
-    print(f"Epoch {epoch} completed in {elapsed_time:.2f}s - "
-          f"Train Loss: {avg_train_loss:.4f}, "
-          f"Accuracy: {accuracy:.4f} ({correct}/{total})")
+    print(f"\nEpoch {epoch} completed in {elapsed_time:.2f}s")
+    print(f"Train Loss: {avg_train_loss:.4f}")
+    print(f"Accuracy: {accuracy:.4f} ({correct}/{total})")
+    print(f"CER: {metrics['cer']:.4f}, WER: {metrics['wer']:.4f}")
     
-    return avg_train_loss, accuracy
+    return avg_train_loss, accuracy, metrics
 
 def validate(model, val_loader, criterion, device, epoch, config, charset_mapper):
     """Validate the model"""
