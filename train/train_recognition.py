@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 import cv2
 import json
 import ast
-# Add this import at the top of your file
-from models.recognition.metrics import calculate_cer, calculate_wer, calculate_text_metrics
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +21,7 @@ from utils.data_loading import ReceiptDataset
 from utils.text_utils import CharsetMapper, preprocess_text, crop_text_regions, collate_text_recognition_batch
 from models.recognition.model import get_model
 from models.recognition.loss import get_loss_function
-from models.recognition.metrics import calculate_text_metrics, print_metrics
+from models.recognition.metrics import calculate_text_metrics, print_metrics, calculate_cer, calculate_wer
 
 class TextRecognitionDataset(torch.utils.data.Dataset):
     """Dataset for text recognition training with real OCR text"""
