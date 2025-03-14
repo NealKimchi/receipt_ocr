@@ -560,7 +560,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch, config
     print(f"Accuracy: {accuracy:.4f} ({correct}/{total})")
     print(f"CER: {metrics['cer']:.4f}, WER: {metrics['wer']:.4f}")
     
-    return avg_train_loss, accuracy, metrics
+    return avg_train_loss, accuracy
 
 def validate(model, val_loader, criterion, device, epoch, config, charset_mapper):
     """Validate the model"""
@@ -739,7 +739,7 @@ def train_model(config, output_dir):
     for epoch in range(1, config['training']['epochs'] + 1):
         # Train for one epoch
         # FIX: Changed to unpack three values - train_loss, train_accuracy, and train_metrics
-        train_loss, train_accuracy, train_metrics = train_epoch(
+        train_loss, train_accuracy = train_epoch(
             model=model,
             train_loader=train_loader,
             criterion=criterion,
