@@ -738,7 +738,8 @@ def train_model(config, output_dir):
     # Train for specified number of epochs
     for epoch in range(1, config['training']['epochs'] + 1):
         # Train for one epoch
-        train_loss, train_accuracy = train_epoch(
+        # FIX: Changed to unpack three values - train_loss, train_accuracy, and train_metrics
+        train_loss, train_accuracy, train_metrics = train_epoch(
             model=model,
             train_loader=train_loader,
             criterion=criterion,
