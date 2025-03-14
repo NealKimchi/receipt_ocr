@@ -433,6 +433,10 @@ def train_model(config, output_dir):
                 if all(val_losses[-i-1] <= val_losses[-i] for i in range(patience)):
                     print(f"Early stopping at epoch {epoch} as validation loss hasn't improved for {patience} epochs")
                     break
+    final_model_path = os.path.join(output_dir, 'final_model.pth')
+    torch.save(model.state_dict(), final_model_path)
+    print(f"Final model saved to {final_model_path}")
+
     return {
         'best_val_loss': best_val_loss,
         'best_f1': best_f1,
