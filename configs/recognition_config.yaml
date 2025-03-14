@@ -45,7 +45,7 @@ loss:
 
 training:
   batch_size: 32  # Batch size for training
-  epochs: 30  # Number of epochs to train
+  epochs: 50  # Number of epochs to train
   learning_rate: 0.001  # Initial learning rate
   weight_decay: 0.0001  # L2 regularization
   # Optimizer settings
