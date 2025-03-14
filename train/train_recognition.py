@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import cv2
 import json
 import ast
+# Add this import at the top of your file
+from models.recognition.metrics import calculate_cer, calculate_wer, calculate_text_metrics
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
