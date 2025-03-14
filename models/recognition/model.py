@@ -302,17 +302,56 @@ class CRNN(nn.Module):
                 # Project to class probabilities
                 # Shape: (batch_size, max_length, num_classes)
                 logits = self.classifier(outputs)
+                attentions_out = attentions
             except Exception as e:
                 # Fall back to CTC path if attention fails
                 print(f"Warning: Attention mechanism failed with error: {e}. Falling back to CTC.")
-                logits = self.classifier(rnn_output)
-                attentions = None
+                logits = None  # Will be handled in CTC path
+                attentions_out = None
         else:
-            # For CTC or inference, use RNN output directly
-            # Project to class probabilities
-            # Shape: (batch_size, width, num_classes)
-            logits = self.classifier(rnn_output)
-            attentions = None
+            # For CTC or inference
+            logits = None
+            attentions_out = None
+        
+        # If logits are not set by attention path, use CTC path
+        if logits is None:
+            try:
+                # Try direct classification with original shape
+                logits = self.classifier(rnn_output)
+            except RuntimeError as e:
+                if "mat1 and mat2 shapes cannot be multiplied" in str(e):
+                    # Get shape information
+                    print(f"Shape mismatch error detected. Applying fix...")
+                    print(f"RNN output shape: {rnn_output.shape}")
+                    print(f"Classifier expects: {self.classifier.in_features} input features")
+                    
+                    # Fix 1: Try reshaping the output
+                    if rnn_output.dim() == 3:  # (batch_size, seq_length, features)
+                        # Option 1: Reshape to 2D for linear layer
+                        seq_len = rnn_output.size(1)
+                        rnn_flat = rnn_output.reshape(-1, rnn_output.size(2))
+                        
+                        # Apply classifier to flattened tensor
+                        try:
+                            logits_flat = self.classifier(rnn_flat)
+                            # Reshape back to 3D
+                            logits = logits_flat.reshape(batch_size, seq_len, -1)
+                            print(f"Reshaped tensor fix succeeded, new logits shape: {logits.shape}")
+                        except RuntimeError:
+                            # Option 2: Try transposing dimensions
+                            print("Reshape failed, trying alternative fix...")
+                            rnn_transposed = rnn_output.transpose(1, 2)  # (batch, features, seq_len)
+                            logits_transposed = self.classifier(rnn_transposed)  # (batch, classes, seq_len)
+                            logits = logits_transposed.transpose(1, 2)  # (batch, seq_len, classes)
+                            print(f"Transpose fix succeeded, new logits shape: {logits.shape}")
+                    else:
+                        # If dimensions are already unexpected, try a more aggressive reshape
+                        rnn_flat = rnn_output.reshape(batch_size, -1, self.classifier.in_features)
+                        logits = self.classifier(rnn_flat)
+                        print(f"Aggressive reshape succeeded, new logits shape: {logits.shape}")
+                else:
+                    # Re-raise if it's a different error
+                    raise
         
         # Apply log softmax over the class dimension
         log_probs = F.log_softmax(logits, dim=-1)
@@ -329,10 +368,9 @@ class CRNN(nn.Module):
             'logits': logits,
             'log_probs': log_probs,
             'predictions': predictions,
-            'attentions': attentions,
+            'attentions': attentions_out,
             'features': features
         }
-
 
 def get_model(config, num_classes):
     """Create and initialize the text recognition model"""
