@@ -8,6 +8,12 @@ This project implements a text detection model for receipts and invoices, capabl
 
 The current implementation concentrates on accurate text region detection and bounding box prediction, which serves as the foundation for a complete OCR system. The model also provides confidence estimation for detected regions, allowing for quality filtering in downstream applications. Future development will extend the system to include text recognition within the detected regions and structured data extraction for specific receipt fields like items, prices, and dates.
 
+## Notebooks
+
+In the notebooks subdirectory there are two notebooks, data_parser and evaluation_results. If you run both you will see the results, data_parser showing the dataloading and the preprocessing of the images. In evaluation_results you will 
+see a sample I was able to download from Talapas of a few of the validation images with the bounding boxes drawn on them from my latest model. While the precision is 0.6983 and the f1 score is 0.4863 for the box metrics I do think it is significantly
+better than that. Looking at the images, the text map is dead on, the only difference is it doesn't seem to separate lines, I believe this can be solved with some hyperparameter tuning like max box height or less aggressive merging.
+
 ## Data Source
 
 The model is trained using the Invoices and Receipts OCR Dataset from Hugging Face (mychen76/invoices-and-receipts_ocr_v2). This dataset provides a rich collection of receipt and invoice scans accompanied by comprehensive annotations.
@@ -185,6 +191,9 @@ The project relies on several key Python libraries:
 - matplotlib for visualization
 - tqdm for progress tracking
 
+## Appendix
+
+[Results]output/run_20250314_123521/train_vis_epoch2_batch249.png
 
 ## Acknowledgements
 
