@@ -9,8 +9,11 @@ import cv2
 from tqdm import tqdm
 import time
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, parent_dir)
+
+# Now you can import using relative imports
 from utils.data_loading import ReceiptDataset, receipt_collate_fn
 from models.detection.model import get_model
 from models.detection.metrics import (
@@ -19,6 +22,7 @@ from models.detection.metrics import (
     calculate_box_metrics,
     comprehensive_evaluation
 )
+
 from torch.utils.data import DataLoader
 
 def create_test_dataloader(dataset_name, batch_size, image_size, num_workers, max_samples=None, cache_dir=None):
