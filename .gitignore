@@ -1,3 +1,4 @@
 preprocessed_data
 line_regions
 *.log
+*.pth
