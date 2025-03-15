@@ -1,0 +1,7 @@
+Best validation loss: 0.2156
+Best F1 score: 0.8872
+Final metrics:
+  Precision: 0.8600
+  Recall: 0.9176
+  F1: 0.8872
+  Iou: 0.7983

@@ -22,20 +22,23 @@ The project is organized into several Python modules, each handling specific asp
 ├── configs/                
     ├── detection_config.yaml
 ├── models/
-    ├── eval_detection.py   # Script to evaluate model
-    ├── loss.py             # loss functions 
-    ├── metrics.py          # metric equations
-    ├── model.py            # model architecture
+    ├── eval_detection.py       # Script to evaluate model
+    ├── loss.py                 # loss functions 
+    ├── metrics.py              # metric equations
+    ├── model.py                # model architecture
 ├── notebooks/
-    ├── data_parser.ipynb   # testing data loader
+    ├── data_parser.ipynb       # testing data loader
+├── output/
+    ├── data_parser.ipynb       # testing data loader
 ├── train/
-    ├── train_detection.py  # train script for data loader
+    ├── eval_20250314_173949    # Contains evaluation of latest model
+    ├── run_20250314_123521     # Contains latest model
 ├── utils/
-    ├── ocr_utils.py        # OCR-specific utilities
-    ├── text_utils.py       # Text processing utilities
-    ├── data_loading.py     # DataLoader class
-├── requirements.txt        # requirements
-├── .gitignore              # .gitignore
+    ├── ocr_utils.py            # OCR-specific utilities
+    ├── text_utils.py           # Text processing utilities
+    ├── data_loading.py         # DataLoader class
+├── requirements.txt            # requirements
+├── .gitignore                  # .gitignore
 ```
 
 The modular design allows for easy extension and modification of individual components as the project evolves toward a complete OCR solution.
@@ -123,7 +126,7 @@ Additionally, GIoU is used to evaluate box regression quality, offering a more n
 To train the model with default parameters:
 
 ```bash
-python train_detection.py --config configs/detection_config.yaml --output_dir outputs/detection
+python train_detection.py 
 ```
 
 The training script will create a timestamped directory within the specified output directory to store model checkpoints, training curves, and visualization samples.
@@ -133,7 +136,7 @@ The training script will create a timestamped directory within the specified out
 To evaluate a trained model:
 
 ```bash
-python eval_detection.py --model_path outputs/detection/run_XXXXXXXX/best_model.pth
+python eval_detection.py --model_path outputs/detection/run_20250314_123521/best_model.pth
 ```
 
 The evaluation script will generate comprehensive metrics and save example visualizations to assess model performance.
@@ -182,9 +185,6 @@ The project relies on several key Python libraries:
 - matplotlib for visualization
 - tqdm for progress tracking
 
-## License
-
-[Your License Info Here]
 
 ## Acknowledgements
 

@@ -1,0 +1,55 @@
+data:
+  cache_dir: null
+  data_dir: data/
+  dataset_name: mychen76/invoices-and-receipts_ocr_v2
+  image_size:
+  - 512
+  - 512
+  max_samples: null
+  num_workers: 4
+  test_split: 0.1
+  train_split: 0.8
+  val_split: 0.1
+evaluation:
+  confidence_threshold: 0.3
+  evaluate_f1: true
+  evaluate_precision: true
+  evaluate_recall: true
+  iou_threshold: 0.3
+  max_boxes: 100
+inference:
+  confidence_threshold: 0.4
+  max_boxes: 100
+  nms_threshold: 0.3
+loss:
+  box_weight: 0.1
+  confidence_weight: 0.5
+  text_map_weight: 1.0
+model:
+  dropout_rate: 0.2
+  in_channels: 3
+  init_filters: 64
+  name: TextDetectionModel
+  out_channels: 1
+output:
+  output_dir: outputs/detection
+  save_best_f1: true
+  save_best_loss: true
+  save_model: true
+  save_visualizations: true
+training:
+  batch_size: 8
+  epochs: 5
+  eval_interval: 1
+  learning_rate: 0.0001
+  log_interval: 10
+  min_lr: 1.0e-06
+  num_workers: 4
+  optimizer: adam
+  save_interval: 5
+  scheduler_type: cosine_warmup
+  use_scheduler: true
+  visualization_interval: 50
+  warmup_epochs: 3
+  warmup_mult: 2
+  weight_decay: 0.0001

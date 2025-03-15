@@ -1,0 +1,11 @@
+===== Evaluation Results =====
+Text Map Metrics:
+  Precision: 0.8669
+  Recall: 0.9105
+  F1 Score: 0.8839
+  IoU: 0.7993
+
+Box-level Metrics:
+  Precision: 0.6983
+  Recall: 0.4012
+  F1 Score: 0.4863
