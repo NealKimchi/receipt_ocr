@@ -193,7 +193,7 @@ The project relies on several key Python libraries:
 
 ## Appendix
 
-[Results]output/run_20250314_123521/train_vis_epoch2_batch249.png
+![Training Visualization](https://github.com/NealKimchi/receipt_ocr/raw/main/output/run_20250314_123521/train_vis_epoch2_batch249.png)
 
 ## Acknowledgements
 
